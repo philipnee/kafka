@@ -16,11 +16,7 @@
  */
 package kafka.examples;
 
-import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.KafkaException;
@@ -52,7 +48,7 @@ public class ExactlyOnceMessageProcessor extends Thread {
     private final String groupInstanceId;
 
     private final KafkaProducer<Integer, String> producer;
-    private final KafkaConsumer<Integer, String> consumer;
+    private final NewKafkaConsumer<Integer, String> consumer;
 
     private final CountDownLatch latch;
 
@@ -157,7 +153,7 @@ public class ExactlyOnceMessageProcessor extends Thread {
         return new ProducerRecord<>(outputTopic, record.key() / 2, "Transformed_" + record.value());
     }
 
-    private long messagesRemaining(final KafkaConsumer<Integer, String> consumer) {
+    private long messagesRemaining(final NewKafkaConsumer<Integer, String> consumer) {
         final Map<TopicPartition, Long> fullEndOffsets = consumer.endOffsets(new ArrayList<>(consumer.assignment()));
         // If we couldn't detect any end offset, that means we are still not able to fetch offsets.
         if (fullEndOffsets.isEmpty()) {
@@ -174,7 +170,7 @@ public class ExactlyOnceMessageProcessor extends Thread {
         }).sum();
     }
 
-    private static void resetToLastCommittedPositions(KafkaConsumer<Integer, String> consumer) {
+    private static void resetToLastCommittedPositions(NewKafkaConsumer<Integer, String> consumer) {
         final Map<TopicPartition, OffsetAndMetadata> committed = consumer.committed(consumer.assignment());
         consumer.assignment().forEach(tp -> {
             OffsetAndMetadata offsetAndMetadata = committed.get(tp);

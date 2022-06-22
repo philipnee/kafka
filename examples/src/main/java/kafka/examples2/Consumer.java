@@ -14,15 +14,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package kafka.examples;
+package kafka.examples2;
 
+import kafka.examples.KafkaProperties;
 import kafka.utils.ShutdownableThread;
-import org.apache.kafka.clients.consumer.*;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.NewKafkaConsumer;
+import org.apache.kafka.common.TopicPartition;
 
-import java.time.Duration;
-import java.util.Collections;
-import java.util.Optional;
-import java.util.Properties;
+import java.util.*;
 import java.util.concurrent.CountDownLatch;
 
 public class Consumer extends ShutdownableThread {
@@ -38,7 +39,7 @@ public class Consumer extends ShutdownableThread {
                     final Optional<String> instanceId,
                     final boolean readCommitted,
                     final int numMessageToConsume,
-                    final CountDownLatch latch) {
+                    final CountDownLatch latch) throws InterruptedException {
         super("KafkaConsumerExample", false);
         this.groupId = groupId;
         Properties props = new Properties();
@@ -60,6 +61,8 @@ public class Consumer extends ShutdownableThread {
         this.numMessageToConsume = numMessageToConsume;
         this.messageRemaining = numMessageToConsume;
         this.latch = latch;
+        TopicPartition tp1 = new TopicPartition("topic-test", 0);
+        consumer.assign(Collections.singletonList(tp1));
     }
 
     NewKafkaConsumer<Integer, String> get() {
@@ -68,9 +71,6 @@ public class Consumer extends ShutdownableThread {
 
     @Override
     public void doWork() {
-        System.out.println("Starting background thread");
-        consumer.startBackgroundThread();
-        consumer.close();
     }
 
     @Override
@@ -81,5 +81,9 @@ public class Consumer extends ShutdownableThread {
     @Override
     public boolean isInterruptible() {
         return false;
+    }
+
+    public void close() {
+        this.consumer.close();
     }
 }
