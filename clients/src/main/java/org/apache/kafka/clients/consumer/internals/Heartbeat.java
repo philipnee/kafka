@@ -128,7 +128,6 @@ public final class Heartbeat {
         update(now);
         return pollTimer.isExpired();
     }
-
     long lastPollTime() {
         return pollTimer.currentTimeMs();
     }

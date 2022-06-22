@@ -1,0 +1,16 @@
+topic already exits: topic-test
+-- describing topic --
+Topic: topic-test
+Partitions: 6, partition ids: 0,1,2,3,4,5
+pour the wine
+need coordfalse
+need coordfalse
+INITIALIZED:: 1660448710940
+need coordtrue
+wakeup
+INITIALIZED:: 1660448710945
+need coordtrue
+need coordtrue
+need coordfalse
+STABLE:: 1660448711456
+need coordfalse
