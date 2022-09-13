@@ -3,24 +3,16 @@ package org.apache.kafka.clients.consumer.internals;
 import org.apache.kafka.clients.*;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor;
-import org.apache.kafka.clients.consumer.channel.KafkaConsumerEventQueue;
-import org.apache.kafka.clients.consumer.channel.KafkaServerEventQueue;
 import org.apache.kafka.clients.consumer.events.*;
-import org.apache.kafka.clients.producer.internals.ProduceRequestResult;
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.errors.AuthenticationException;
-import org.apache.kafka.common.errors.FencedInstanceIdException;
 import org.apache.kafka.common.errors.GroupAuthorizationException;
 import org.apache.kafka.common.errors.InterruptException;
-import org.apache.kafka.common.errors.RebalanceInProgressException;
-import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.internals.ClusterResourceListeners;
-import org.apache.kafka.common.message.HeartbeatRequestData;
 import org.apache.kafka.common.metrics.*;
 import org.apache.kafka.common.network.ChannelBuilder;
 import org.apache.kafka.common.network.Selector;
-import org.apache.kafka.common.requests.HeartbeatRequest;
 import org.apache.kafka.common.utils.*;
 import org.apache.kafka.common.utils.Time;
 
@@ -28,6 +20,7 @@ import org.slf4j.Logger;
 
 import java.net.InetSocketAddress;
 import java.util.*;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -63,9 +56,10 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
     private IsolationLevel isolationLevel;
     private final Heartbeat heartbeat;
 
-    private KafkaServerEventQueue serverEventQueue;
-    private KafkaConsumerEventQueue consumerEventQueue;
-    private Map<KafkaServerEventType, ServerEventExecutor> eventExecutorRegistry;
+    private BlockingQueue<ServerEvent> serverEventQueue;
+    private BlockingQueue<KafkaConsumerEvent> consumerEventQueue;
+
+    private Map<ServerEventType, ServerEventExecutor> eventExecutorRegistry;
 
     private AtomicBoolean shouldWakeup = new AtomicBoolean(false);
 
@@ -76,8 +70,8 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
                                     SubscriptionState subscriptions, // TODO: it is currently a shared state between polling and background thread
                                     ClusterResourceListeners clusterResourceListeners,
                                     Metrics metrics,
-                                    KafkaServerEventQueue serverEventQueue,
-                                    KafkaConsumerEventQueue consumerEventQueue) {
+                                    BlockingQueue<ServerEvent> serverEventQueue,
+                                    BlockingQueue<KafkaConsumerEvent> consumerEventQueue) {
         super(CONSUMER_BACKGROUND_THREAD_PREFIX, true);
         configuration(config);
         this.time = Time.SYSTEM;
@@ -138,16 +132,16 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
         this.eventExecutorRegistry = initializeEventExecutorRegistry();
     }
 
-    private Map<KafkaServerEventType, ServerEventExecutor> initializeEventExecutorRegistry() {
-        Map<KafkaServerEventType, ServerEventExecutor> registry = new ConcurrentHashMap<>();
-        registry.put(KafkaServerEventType.NOOP, new ServerEventExecutor() {
+    private Map<ServerEventType, ServerEventExecutor> initializeEventExecutorRegistry() {
+        Map<ServerEventType, ServerEventExecutor> registry = new ConcurrentHashMap<>();
+        registry.put(ServerEventType.NOOP, new ServerEventExecutor() {
             @Override
             public Void call() throws Exception {
                 return null;
             }
         });
 
-        registry.put(KafkaServerEventType.ASSIGN, new PartitionAssignmentEventExecutor<>(
+        registry.put(ServerEventType.ASSIGN, new PartitionAssignmentEventExecutor<>(
                 time,
                 this.metadata,
                 this.fetcher,
@@ -192,7 +186,7 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
         try {
             while (!closed) {
                 if (shouldWakeup.get() || !serverEventQueue.isEmpty()) {
-                    Optional<KafkaServerEvent> event = serverEventQueue.poll();
+                    Optional<ServerEvent> event = Optional.ofNullable(serverEventQueue.poll());
                     runStateMachine(event);
                     if (event.isPresent() && eventExecutorRegistry.containsKey(event.get().getEventType())) {
                         ServerEventExecutor executor = eventExecutorRegistry.getOrDefault(event.get().getEventType(), new NoopEventExecutor());
@@ -223,9 +217,9 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
         }
     }
 
-    private void runStateMachine(Optional<KafkaServerEvent> optionalEvent) throws InterruptedException {
+    private void runStateMachine(Optional<ServerEvent> optionalEvent) throws InterruptedException {
         if(optionalEvent.isPresent()) {
-            KafkaServerEvent event = optionalEvent.get();
+            ServerEvent event = optionalEvent.get();
             if (event.isRequireCoordinator()) {
                 this.needCoordinator = true;
             }

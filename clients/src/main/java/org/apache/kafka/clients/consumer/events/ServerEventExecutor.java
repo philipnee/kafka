@@ -1,15 +1,11 @@
 package org.apache.kafka.clients.consumer.events;
 
-import org.apache.kafka.clients.consumer.channel.KafkaConsumerEventQueue;
-import org.apache.kafka.clients.consumer.channel.KafkaServerEventQueue;
-
-import java.util.Optional;
 import java.util.concurrent.Callable;
 
 abstract public class ServerEventExecutor implements Callable<Void> {
-    KafkaServerEvent serverEvent;
+    ServerEvent serverEvent;
 
-    public void run(KafkaServerEvent event) { //TODO: return type
+    public void run(ServerEvent event) { //TODO: return type
         try {
             this.serverEvent = event;
 

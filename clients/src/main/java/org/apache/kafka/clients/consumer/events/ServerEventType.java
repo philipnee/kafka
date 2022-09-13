@@ -1,6 +1,6 @@
 package org.apache.kafka.clients.consumer.events;
 
-public enum KafkaServerEventType {
+public enum ServerEventType {
     NOOP,
     FETCH,
     COMMIT,

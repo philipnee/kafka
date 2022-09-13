@@ -1,8 +1,8 @@
 package org.apache.kafka.clients.consumer.events;
 
-public class InitializationEvent extends KafkaServerEvent {
+public class InitializationEvent extends ServerEvent {
 
     public InitializationEvent() {
-        super(KafkaServerEventType.NOOP, false);
+        super(ServerEventType.NOOP, false);
     }
 }

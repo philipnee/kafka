@@ -2,10 +2,8 @@ package org.apache.kafka.clients.consumer;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.GroupRebalanceConfig;
-import org.apache.kafka.clients.consumer.channel.KafkaConsumerEventQueue;
-import org.apache.kafka.clients.consumer.channel.KafkaServerEventQueue;
 import org.apache.kafka.clients.consumer.events.InitializationEvent;
-import org.apache.kafka.clients.consumer.events.KafkaServerEvent;
+import org.apache.kafka.clients.consumer.events.ServerEvent;
 import org.apache.kafka.clients.consumer.events.PartitionAssignmentServerEvent;
 import org.apache.kafka.clients.consumer.internals.ConsumerBackgroundThread;
 import org.apache.kafka.clients.consumer.internals.ConsumerInterceptors;
@@ -25,6 +23,8 @@ import org.slf4j.Logger;
 
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -60,8 +60,8 @@ public class NewKafkaConsumer<K, V> implements Consumer<K, V> {
 
     private ConsumerBackgroundThread<K, V> backgroundThread;
 
-    private KafkaServerEventQueue serverEventQueue;
-    private KafkaConsumerEventQueue consumerEventQueue;
+    private BlockingQueue<ServerEvent> serverEventQueue;
+    private BlockingQueue<KafkaConsumerEvent> consumerEventQueue;
 
     public NewKafkaConsumer(Properties properties) {
         this(properties, null, null);
@@ -93,12 +93,8 @@ public class NewKafkaConsumer<K, V> implements Consumer<K, V> {
         this.groupId = Optional.ofNullable(groupRebalanceConfig.groupId);
 
         // If group.instance.id is set, we will append it to the log context.
-        if (groupRebalanceConfig.groupInstanceId.isPresent()) {
-            logContext = new LogContext("[Consumer instanceId=" + groupRebalanceConfig.groupInstanceId.get() +
-                    ", clientId=" + clientId + ", groupId=" + groupId.orElse("null") + "] ");
-        } else {
-            logContext = new LogContext("[Consumer clientId=" + clientId + ", groupId=" + groupId.orElse("null") + "] ");
-        }
+        logContext = groupRebalanceConfig.groupInstanceId.map(s -> new LogContext("[Consumer instanceId=" + s +
+                ", clientId=" + clientId + ", groupId=" + groupId.orElse("null") + "] ")).orElseGet(() -> new LogContext("[Consumer clientId=" + clientId + ", groupId=" + groupId.orElse("null") + "] "));
 
         this.log = logContext.logger(getClass());
         this.keyDeserializer = initializeKeyDeserializer(config, keyDeser);
@@ -125,8 +121,8 @@ public class NewKafkaConsumer<K, V> implements Consumer<K, V> {
                 Collections.singletonMap(ConsumerConfig.CLIENT_ID_CONFIG, clientId));
         this.interceptors = new ConsumerInterceptors<>(interceptorList);
 
-        this.serverEventQueue = new KafkaServerEventQueue(config);
-        this.consumerEventQueue = new KafkaConsumerEventQueue();
+        this.serverEventQueue = new ArrayBlockingQueue<>(100);
+        this.consumerEventQueue = new ArrayBlockingQueue<>(100);
 
         this.backgroundThread = new ConsumerBackgroundThread<>(
                 config,
@@ -137,7 +133,7 @@ public class NewKafkaConsumer<K, V> implements Consumer<K, V> {
                 this.consumerEventQueue);
         System.out.println("pour the wine");
         startBackgroundThread();
-        this.serverEventQueue.enqueue(new InitializationEvent()); // to kick off the background thread
+        this.serverEventQueue.add(new InitializationEvent()); // to kick off the background thread
         this.backgroundThread.wakeup();
     }
 
@@ -248,8 +244,8 @@ public class NewKafkaConsumer<K, V> implements Consumer<K, V> {
             if (this.subscriptionState.assignFromUser(new HashSet<>(partitions)))
                 updateMetadata = true;
 
-            KafkaServerEvent serverEvent = new PartitionAssignmentServerEvent(partitions, updateMetadata);
-            this.serverEventQueue.enqueue(serverEvent);
+            ServerEvent serverEvent = new PartitionAssignmentServerEvent(partitions, updateMetadata);
+            this.serverEventQueue.add(serverEvent);
             this.backgroundThread.wakeup();
         } finally {
             release();
