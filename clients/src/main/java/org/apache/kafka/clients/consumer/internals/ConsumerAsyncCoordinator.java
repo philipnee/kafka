@@ -16,6 +16,8 @@
  */
 package org.apache.kafka.clients.consumer.internals;
 
+import java.util.LinkedList;
+import java.util.Queue;
 import java.util.SortedSet;
 import java.util.TreeSet;
 import org.apache.kafka.clients.GroupRebalanceConfig;
@@ -36,7 +38,6 @@ import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.errors.FencedInstanceIdException;
 import org.apache.kafka.common.errors.GroupAuthorizationException;
 import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.errors.UnstableOffsetCommitException;
@@ -78,8 +79,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -102,7 +101,7 @@ public final class ConsumerAsyncCoordinator extends AbstractAsyncCoordinator {
     private final boolean autoCommitEnabled;
     private final int autoCommitIntervalMs;
     private final ConsumerInterceptors<?, ?> interceptors;
-    private final AtomicInteger pendingAsyncCommits;
+    protected final AtomicInteger pendingAsyncCommits;
 
     // this collection must be thread-safe because it is modified from the response handler
     // of offset commit requests, which may be invoked from the heartbeat thread
@@ -119,7 +118,7 @@ public final class ConsumerAsyncCoordinator extends AbstractAsyncCoordinator {
     private PendingCommittedOffsetRequest pendingCommittedOffsetRequest = null;
 
     private Heartbeat heartbeat;
-    private List<RequestFuture<Void>> pendingAsyncCommitsQueue = new ArrayList<>();
+    private Queue<PendingOffsetCommit> pendingAsyncCommitsQueue = new LinkedList<PendingOffsetCommit>();
 
     private static class PendingCommittedOffsetRequest {
         private final Set<TopicPartition> requestedPartitions;
@@ -971,8 +970,6 @@ public final class ConsumerAsyncCoordinator extends AbstractAsyncCoordinator {
         }
     }
 
-
-
     public RequestFuture<Void> commitOffsetsAsync(final Map<TopicPartition, OffsetAndMetadata> offsets, final OffsetCommitCallback callback) {
         // invokeCompletedOffsetCommitCallbacks();
 
@@ -995,20 +992,46 @@ public final class ConsumerAsyncCoordinator extends AbstractAsyncCoordinator {
             // the coordinator).
             return doCommitOffsetsAsync(offsets, callback);
         }
-
-        // we don't know the current coordinator, so try to find it and then send the commit
-        // or fail (we don't want recursive retries which can cause offset commits to arrive
-        // out of order). Note that there may be multiple offset commits chained to the same
-        // coordinator lookup request. This is fine because the listeners will be invoked in
-        // the same order that they were added. Note also that AbstractCoordinator prevents
-        // multiple concurrent coordinator lookup requests.
-        pendingAsyncCommitsQueue.add(doCommitOffsetsAsync(offsets, callback));
+        pendingAsyncCommitsQueue.add(new PendingOffsetCommit(offsets, callback));
 
         // ensure the commit has a chance to be transmitted (without blocking on its completion).
         // Note that commits are treated as heartbeats by the coordinator, so there is no need to
         // explicitly allow heartbeats through delayed task execution.
         // client.pollNoWakeup(); let the BT handle the poll here
         return future;
+    }
+
+    private Map<String, OffsetCommitRequestData.OffsetCommitRequestTopic> buildOffsetCommit(final Map<TopicPartition, OffsetAndMetadata> offsets) {
+        Map<String, OffsetCommitRequestData.OffsetCommitRequestTopic> requestTopicDataMap = new HashMap<>();
+        for (Map.Entry<TopicPartition, OffsetAndMetadata> entry : offsets.entrySet()) {
+            TopicPartition topicPartition = entry.getKey();
+            OffsetAndMetadata offsetAndMetadata = entry.getValue();
+            if (offsetAndMetadata.offset() < 0) {
+                return null;
+            }
+
+            OffsetCommitRequestData.OffsetCommitRequestTopic topic = requestTopicDataMap
+                    .getOrDefault(topicPartition.topic(),
+                            new OffsetCommitRequestData.OffsetCommitRequestTopic()
+                                    .setName(topicPartition.topic())
+                    );
+
+            topic.partitions().add(new OffsetCommitRequestData.OffsetCommitRequestPartition()
+                    .setPartitionIndex(topicPartition.partition())
+                    .setCommittedOffset(offsetAndMetadata.offset())
+                    .setCommittedLeaderEpoch(offsetAndMetadata.leaderEpoch().orElse(RecordBatch.NO_PARTITION_LEADER_EPOCH))
+                    .setCommittedMetadata(offsetAndMetadata.metadata())
+            );
+            requestTopicDataMap.put(topicPartition.topic(), topic);
+        }
+        return requestTopicDataMap;
+    }
+
+    protected Queue<PendingOffsetCommit> getPendingCommits() {
+        return pendingAsyncCommitsQueue;
+    }
+    protected void purgePendingCommits() {
+        pendingAsyncCommitsQueue.clear();
     }
 
     private RequestFuture<Void> doCommitOffsetsAsync(final Map<TopicPartition, OffsetAndMetadata> offsets, final OffsetCommitCallback callback) {
@@ -1455,12 +1478,22 @@ public final class ConsumerAsyncCoordinator extends AbstractAsyncCoordinator {
         }
     }
 
-    private static class OffsetCommitCompletion {
+    static class PendingOffsetCommit {
+        final OffsetCommitCallback callback;
+        final Map<TopicPartition, OffsetAndMetadata> offsets;
+
+        public PendingOffsetCommit(Map<TopicPartition, OffsetAndMetadata> offsets, OffsetCommitCallback callback) {
+            this.callback = callback;
+            this.offsets = offsets;
+        }
+    }
+
+    static class OffsetCommitCompletion {
         private final OffsetCommitCallback callback;
         private final Map<TopicPartition, OffsetAndMetadata> offsets;
-        private final Exception exception;
+        private Exception exception;
 
-        private OffsetCommitCompletion(OffsetCommitCallback callback, Map<TopicPartition, OffsetAndMetadata> offsets, Exception exception) {
+        OffsetCommitCompletion(OffsetCommitCallback callback, Map<TopicPartition, OffsetAndMetadata> offsets, Exception exception) {
             this.callback = callback;
             this.offsets = offsets;
             this.exception = exception;

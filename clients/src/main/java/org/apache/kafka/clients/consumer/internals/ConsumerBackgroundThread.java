@@ -3,6 +3,8 @@ package org.apache.kafka.clients.consumer.internals;
 import org.apache.kafka.clients.*;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor;
+import org.apache.kafka.clients.consumer.NewKafkaConsumer;
+import org.apache.kafka.clients.consumer.RetriableCommitFailedException;
 import org.apache.kafka.clients.consumer.events.*;
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.KafkaException;
@@ -22,6 +24,7 @@ import java.net.InetSocketAddress;
 import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -65,6 +68,7 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
 
     private boolean shouldHeartBeat = false;
     private final AtomicReference<RuntimeException> failed = new AtomicReference<>(null);
+    private final ConcurrentLinkedQueue<ConsumerAsyncCoordinator.OffsetCommitCompletion> completedOffsetCommits;
 
     public ConsumerBackgroundThread(ConsumerConfig config,
                                     SubscriptionState subscriptions, // TODO: it is currently a shared state between polling and background thread
@@ -130,6 +134,7 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
 
         // contains a bunch of event executors, it is unmodifiable after initialized
         this.eventExecutorRegistry = initializeEventExecutorRegistry();
+        this.completedOffsetCommits = new ConcurrentLinkedQueue<>();
     }
 
     private Map<ServerEventType, ServerEventExecutor> initializeEventExecutorRegistry() {
@@ -188,6 +193,7 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
                 if (shouldWakeup.get() || !serverEventQueue.isEmpty()) {
                     Optional<AbstractServerEvent> event = Optional.ofNullable(serverEventQueue.poll());
                     runStateMachine(event);
+
                     if (event.isPresent() && eventExecutorRegistry.containsKey(event.get().getEventType())) {
                         ServerEventExecutor executor = eventExecutorRegistry.getOrDefault(event.get().getEventType(), new NoopEventExecutor());
                         executor.run(event.get());
@@ -244,6 +250,7 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
                         break;
                     }
                     coordinator.poll();
+
                     return;
                 case DOWN:
                     maybeTransitionToInitialized();
@@ -257,38 +264,37 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
         stateMachine.transitionTo(BackgroundStates.INITIALIZED);
     }
 
-    /*
-    private void maybeHeartbeat(long heartbeatTimeoutMs) {
-        networkClient.pollNoWakeup();
-        if(coordinator.coordinatorUnknown()) {
-            log.error("no coordinator, rediscover");
-            maybeTransitionToInitialized();
-            return;
-        }
-
-        if(heartbeat.shouldHeartbeat(time.milliseconds())) {
-
-        }
-    }
-
-    private RequestFuture<Void> sendHeartbeat() {
-        HeartbeatRequest.Builder requestBuilder =
-                new HeartbeatRequest.Builder(new HeartbeatRequestData()
-                        .setGroupId(groupRebalanceConfig.groupId)
-                        .setMemberId(this.generation.memberId)
-                        .setGroupInstanceId(this.groupRebalanceConfig.groupInstanceId.orElse(null))
-                        .setGenerationId(this.generation.generationId));
-    }
-
-     */
-
-    // TODO: ask Jason about the blocking behavior of coordinator discovery
     private void maybeTransitionToCoordinatorDiscovery() {
+        maybeHandleUncommittedOffsets();
         if(coordinator.coordinatorUnknown() && !coordinator.ensureCoordinatorReady()) {
             stateMachine.transitionTo(BackgroundStates.INITIALIZED);
             return;
         }
+
         stateMachine.transitionTo(BackgroundStates.COORDINATOR_DISCOVERY);
+    }
+
+    private void maybeHandleUncommittedOffsets() {
+        Queue<ConsumerAsyncCoordinator.PendingOffsetCommit> pendingCommits = coordinator.getPendingCommits();
+        while(pendingCommits.size() > 0) {
+            ConsumerAsyncCoordinator.PendingOffsetCommit pendingCommit = pendingCommits.poll();
+            coordinator.lookupCoordinator().addListener(new RequestFutureListener<Void>() {
+                @Override
+                public void onSuccess(Void value) {
+                    coordinator.commitOffsetsAsync(pendingCommit.offsets,pendingCommit.callback);
+                    networkClient.pollNoWakeup();
+                }
+
+                @Override
+                public void onFailure(RuntimeException e) {
+                    completedOffsetCommits.add(new ConsumerAsyncCoordinator.OffsetCommitCompletion(
+                            pendingCommit.callback,
+                            pendingCommit.offsets,
+                            new RetriableCommitFailedException(e)));
+                }
+            });
+        }
+        coordinator.purgePendingCommits();
     }
 
     public void wakeup() {
