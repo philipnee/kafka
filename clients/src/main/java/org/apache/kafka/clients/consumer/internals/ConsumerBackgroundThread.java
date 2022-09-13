@@ -31,7 +31,7 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
     private static final String CONSUMER_BACKGROUND_THREAD_PREFIX = "consumer_background_thread";
     private final Time time;
     private final LogContext logContext;
-    private final AsyncConsumerCoordinator coordinator;
+    private final ConsumerAsyncCoordinator coordinator;
     private final List<ConsumerPartitionAssignor> assignors;
     private final SubscriptionState subscription;
     private final Fetcher<K, V> fetcher;
@@ -56,8 +56,8 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
     private IsolationLevel isolationLevel;
     private final Heartbeat heartbeat;
 
-    private BlockingQueue<ServerEvent> serverEventQueue;
-    private BlockingQueue<KafkaConsumerEvent> consumerEventQueue;
+    private BlockingQueue<AbstractServerEvent> serverEventQueue;
+    private BlockingQueue<AbstractConsumerEvent> consumerEventQueue;
 
     private Map<ServerEventType, ServerEventExecutor> eventExecutorRegistry;
 
@@ -70,8 +70,8 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
                                     SubscriptionState subscriptions, // TODO: it is currently a shared state between polling and background thread
                                     ClusterResourceListeners clusterResourceListeners,
                                     Metrics metrics,
-                                    BlockingQueue<ServerEvent> serverEventQueue,
-                                    BlockingQueue<KafkaConsumerEvent> consumerEventQueue) {
+                                    BlockingQueue<AbstractServerEvent> serverEventQueue,
+                                    BlockingQueue<AbstractConsumerEvent> consumerEventQueue) {
         super(CONSUMER_BACKGROUND_THREAD_PREFIX, true);
         configuration(config);
         this.time = Time.SYSTEM;
@@ -150,7 +150,7 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
         return Collections.unmodifiableMap(registry);
     }
 
-    private AsyncConsumerCoordinator maybeInitiateCoordinator(Optional<String> groupId, ConsumerConfig config) {
+    private ConsumerAsyncCoordinator maybeInitiateCoordinator(Optional<String> groupId, ConsumerConfig config) {
         boolean enableAutoCommit = config.getBoolean(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG);
         if (!groupId.isPresent()) {
             config.ignore(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG);
@@ -158,7 +158,7 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
             return null;
         }
 
-        return new AsyncConsumerCoordinator(groupRebalanceConfig,
+        return new ConsumerAsyncCoordinator(groupRebalanceConfig,
                 logContext,
                 this.networkClient,
                 assignors,
@@ -186,7 +186,7 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
         try {
             while (!closed) {
                 if (shouldWakeup.get() || !serverEventQueue.isEmpty()) {
-                    Optional<ServerEvent> event = Optional.ofNullable(serverEventQueue.poll());
+                    Optional<AbstractServerEvent> event = Optional.ofNullable(serverEventQueue.poll());
                     runStateMachine(event);
                     if (event.isPresent() && eventExecutorRegistry.containsKey(event.get().getEventType())) {
                         ServerEventExecutor executor = eventExecutorRegistry.getOrDefault(event.get().getEventType(), new NoopEventExecutor());
@@ -217,9 +217,9 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
         }
     }
 
-    private void runStateMachine(Optional<ServerEvent> optionalEvent) throws InterruptedException {
+    private void runStateMachine(Optional<AbstractServerEvent> optionalEvent) throws InterruptedException {
         if(optionalEvent.isPresent()) {
-            ServerEvent event = optionalEvent.get();
+            AbstractServerEvent event = optionalEvent.get();
             if (event.isRequireCoordinator()) {
                 this.needCoordinator = true;
             }

@@ -4,14 +4,16 @@ import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
-public class CommitEvent extends ServerEvent {
+public class CommitEventAbstract extends AbstractServerEvent {
     private boolean isAsync;
     final Map<TopicPartition, OffsetAndMetadata> consumedOffsets;
+    CompletableFuture<Void> asyncCommitFuture;
 
-    public CommitEvent(final Map<TopicPartition, OffsetAndMetadata> offsets, boolean isAsync) {
+    public CommitEventAbstract(final Map<TopicPartition, OffsetAndMetadata> offsets, CompletableFuture<Void> future) {
         super(ServerEventType.COMMIT, false);
-        this.isAsync = isAsync;
         this.consumedOffsets = offsets;
+        this.asyncCommitFuture = future;
     }
 }

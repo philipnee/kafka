@@ -117,16 +117,14 @@ public abstract class AbstractAsyncCoordinator implements Closeable {
         PREPARING_REBALANCE,  // the client has sent the join group request, but have not received response
         COMMITTING_OFFSET,
         REVOKING_PARTITIONS,
-        PARTITION_REVOKED,
         COMPLETING_REBALANCE, // the client has received join group response, but have not received assignment
-        STABLE;               // the client has joined and is sending heartbeats
+        STABLE, DOWN;               // the client has joined and is sending heartbeats
 
         public boolean hasNotJoinedGroup() {
             return equals(UNJOINED)
                     || equals(PREPARING_REBALANCE)
                     || equals(COMMITTING_OFFSET)
-                    || equals(REVOKING_PARTITIONS)
-                    || equals(PARTITION_REVOKED);
+                    || equals(REVOKING_PARTITIONS);
         }
     }
 
@@ -321,7 +319,7 @@ public abstract class AbstractAsyncCoordinator implements Closeable {
     boolean ensureActiveGroup() {
         // always ensure that the coordinator is ready because we may have been disconnected
         // when sending heartbeats and does not necessarily require us to rejoin the group.
-        if (!ensureCoordinatorReady()) {
+        if (!coordinatorUnknown()) {
             return false;
         }
 
@@ -347,7 +345,7 @@ public abstract class AbstractAsyncCoordinator implements Closeable {
          if(!rejoinNeededOrPending())
              return false;
 
-         if (!ensureCoordinatorReady()) {
+         if (!coordinatorUnknown()) {
              return false;
          }
 
@@ -373,7 +371,6 @@ public abstract class AbstractAsyncCoordinator implements Closeable {
          state = MemberState.REVOKING_PARTITIONS;
          log.debug("Revoking partitions before joinGroup");
          revokePartitions(generation.generationId, generation.memberId);
-         state = MemberState.PARTITION_REVOKED;
 
          final RequestFuture<ByteBuffer> future = initiateJoinGroup();
          client.poll(future);

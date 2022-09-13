@@ -90,7 +90,7 @@ import static org.apache.kafka.clients.consumer.CooperativeStickyAssignor.COOPER
 /**
  * This class manages the coordination process with the consumer coordinator.
  */
-public final class AsyncConsumerCoordinator extends AbstractAsyncCoordinator {
+public final class ConsumerAsyncCoordinator extends AbstractAsyncCoordinator {
     private final static TopicPartitionComparator COMPARATOR = new TopicPartitionComparator();
 
     private final GroupRebalanceConfig rebalanceConfig;
@@ -99,7 +99,6 @@ public final class AsyncConsumerCoordinator extends AbstractAsyncCoordinator {
     private final ConsumerMetadata metadata;
     private final ConsumerCoordinatorMetrics sensors;
     private final SubscriptionState subscriptions;
-    private final OffsetCommitCallback defaultOffsetCommitCallback;
     private final boolean autoCommitEnabled;
     private final int autoCommitIntervalMs;
     private final ConsumerInterceptors<?, ?> interceptors;
@@ -107,14 +106,12 @@ public final class AsyncConsumerCoordinator extends AbstractAsyncCoordinator {
 
     // this collection must be thread-safe because it is modified from the response handler
     // of offset commit requests, which may be invoked from the heartbeat thread
-    private final ConcurrentLinkedQueue<OffsetCommitCompletion> completedOffsetCommits;
 
     private boolean isLeader = false;
     private Set<String> joinedSubscription;
     private MetadataSnapshot metadataSnapshot;
     private MetadataSnapshot assignmentSnapshot;
     private Timer nextAutoCommitTimer;
-    private AtomicBoolean asyncCommitFenced;
     private ConsumerGroupMetadata groupMetadata;
     private final boolean throwOnFetchStableOffsetsUnsupported;
 
@@ -122,6 +119,7 @@ public final class AsyncConsumerCoordinator extends AbstractAsyncCoordinator {
     private PendingCommittedOffsetRequest pendingCommittedOffsetRequest = null;
 
     private Heartbeat heartbeat;
+    private List<RequestFuture<Void>> pendingAsyncCommitsQueue = new ArrayList<>();
 
     private static class PendingCommittedOffsetRequest {
         private final Set<TopicPartition> requestedPartitions;
@@ -146,19 +144,19 @@ public final class AsyncConsumerCoordinator extends AbstractAsyncCoordinator {
     /**
      * Initialize the coordination manager.
      */
-    public AsyncConsumerCoordinator(GroupRebalanceConfig rebalanceConfig,
-                               LogContext logContext,
-                               ConsumerNetworkClient client,
-                               List<ConsumerPartitionAssignor> assignors,
-                               ConsumerMetadata metadata,
-                               SubscriptionState subscriptions,
-                               Metrics metrics,
-                               String metricGrpPrefix,
-                               Time time,
-                               boolean autoCommitEnabled,
-                               int autoCommitIntervalMs,
-                               ConsumerInterceptors<?, ?> interceptors,
-                               boolean throwOnFetchStableOffsetsUnsupported) {
+    public ConsumerAsyncCoordinator(GroupRebalanceConfig rebalanceConfig,
+                                    LogContext logContext,
+                                    ConsumerNetworkClient client,
+                                    List<ConsumerPartitionAssignor> assignors,
+                                    ConsumerMetadata metadata,
+                                    SubscriptionState subscriptions,
+                                    Metrics metrics,
+                                    String metricGrpPrefix,
+                                    Time time,
+                                    boolean autoCommitEnabled,
+                                    int autoCommitIntervalMs,
+                                    ConsumerInterceptors<?, ?> interceptors,
+                                    boolean throwOnFetchStableOffsetsUnsupported) {
         super(rebalanceConfig,
                 logContext,
                 client,
@@ -170,15 +168,12 @@ public final class AsyncConsumerCoordinator extends AbstractAsyncCoordinator {
         this.metadata = metadata;
         this.metadataSnapshot = new MetadataSnapshot(subscriptions, metadata.fetch(), metadata.updateVersion());
         this.subscriptions = subscriptions;
-        this.defaultOffsetCommitCallback = new DefaultOffsetCommitCallback();
         this.autoCommitEnabled = autoCommitEnabled;
         this.autoCommitIntervalMs = autoCommitIntervalMs;
         this.assignors = assignors;
-        this.completedOffsetCommits = new ConcurrentLinkedQueue<>();
         this.sensors = new ConsumerCoordinatorMetrics(metrics, metricGrpPrefix);
         this.interceptors = interceptors;
         this.pendingAsyncCommits = new AtomicInteger();
-        this.asyncCommitFenced = new AtomicBoolean(false);
         this.groupMetadata = new ConsumerGroupMetadata(rebalanceConfig.groupId,
                 JoinGroupRequest.UNKNOWN_GENERATION_ID, JoinGroupRequest.UNKNOWN_MEMBER_ID, rebalanceConfig.groupInstanceId);
         this.throwOnFetchStableOffsetsUnsupported = throwOnFetchStableOffsetsUnsupported;
@@ -484,10 +479,6 @@ public final class AsyncConsumerCoordinator extends AbstractAsyncCoordinator {
         }
     }
 
-    private boolean coordinatorUnknownAndUnready() {
-        return coordinatorUnknown() && !ensureCoordinatorReady();
-    }
-
     /**
      * Poll for coordinator events. This ensures that the coordinator is known and that the consumer
      * has joined the group (if it is using group management). This also handles periodic offset commits
@@ -502,8 +493,6 @@ public final class AsyncConsumerCoordinator extends AbstractAsyncCoordinator {
     public boolean poll(Timer timer) {
         maybeUpdateSubscriptionMetadata();
 
-        invokeCompletedOffsetCommitCallbacks();
-
         if (subscriptions.hasAutoAssignedPartitions()) {
             if (protocol == null) {
                 throw new IllegalStateException("User configured " + ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG +
@@ -512,7 +501,7 @@ public final class AsyncConsumerCoordinator extends AbstractAsyncCoordinator {
             // Always update the heartbeat last poll time so that the heartbeat thread does not leave the
             // group proactively due to application inactivity even if (say) the coordinator cannot be found.
             //pollHeartbeat(timer.currentTimeMs());
-            if (coordinatorUnknownAndUnready()) {
+            if (coordinatorUnknown()) {
                 return false;
             }
 
@@ -970,41 +959,30 @@ public final class AsyncConsumerCoordinator extends AbstractAsyncCoordinator {
         // we do not need to re-enable wakeups since we are closing already
         client.disableWakeups();
         try {
-            maybeAutoCommitOffsetsSync(timer);
+            maybeAutoCommitOffsetsAsync();
             while (pendingAsyncCommits.get() > 0 && timer.notExpired()) {
                 ensureCoordinatorReady();
                 client.poll(timer);
-                invokeCompletedOffsetCommitCallbacks();
+                // invokeCompletedOffsetCommitCallbacks();
             }
         } finally {
+            state = MemberState.DOWN;
             super.close(timer);
         }
     }
 
-    // visible for testing
-    void invokeCompletedOffsetCommitCallbacks() {
-        if (asyncCommitFenced.get()) {
-            throw new FencedInstanceIdException("Get fenced exception for group.instance.id "
-                    + rebalanceConfig.groupInstanceId.orElse("unset_instance_id")
-                    + ", current member.id is " + memberId());
-        }
-        while (true) {
-            OffsetCommitCompletion completion = completedOffsetCommits.poll();
-            if (completion == null) {
-                break;
-            }
-            completion.invoke();
-        }
-    }
+
 
     public RequestFuture<Void> commitOffsetsAsync(final Map<TopicPartition, OffsetAndMetadata> offsets, final OffsetCommitCallback callback) {
-        invokeCompletedOffsetCommitCallbacks();
+        // invokeCompletedOffsetCommitCallbacks();
 
         RequestFuture<Void> future = null;
         if (offsets.isEmpty()) {
             // No need to check coordinator if offsets is empty since commit of empty offsets is completed locally.
-            future = doCommitOffsetsAsync(offsets, callback);
-        } else if (!coordinatorUnknownAndUnready()) {
+            return doCommitOffsetsAsync(offsets, callback);
+        }
+
+        if (!coordinatorUnknown()) {
             // we need to make sure coordinator is ready before committing, since
             // this is for async committing we do not try to block, but just try once to
             // clear the previous discover-coordinator future, resend, or get responses;
@@ -1015,41 +993,27 @@ public final class AsyncConsumerCoordinator extends AbstractAsyncCoordinator {
             // it's not known or ready, since this is the only place we can send such request
             // under manual assignment (there we would not have heartbeat thread trying to auto-rediscover
             // the coordinator).
-            future = doCommitOffsetsAsync(offsets, callback);
-        } else {
-            // we don't know the current coordinator, so try to find it and then send the commit
-            // or fail (we don't want recursive retries which can cause offset commits to arrive
-            // out of order). Note that there may be multiple offset commits chained to the same
-            // coordinator lookup request. This is fine because the listeners will be invoked in
-            // the same order that they were added. Note also that AbstractCoordinator prevents
-            // multiple concurrent coordinator lookup requests.
-            pendingAsyncCommits.incrementAndGet();
-            lookupCoordinator().addListener(new RequestFutureListener<Void>() {
-                @Override
-                public void onSuccess(Void value) {
-                    pendingAsyncCommits.decrementAndGet();
-                    doCommitOffsetsAsync(offsets, callback);
-                    client.pollNoWakeup();
-                }
-
-                @Override
-                public void onFailure(RuntimeException e) {
-                    pendingAsyncCommits.decrementAndGet();
-                    completedOffsetCommits.add(new OffsetCommitCompletion(callback, offsets,
-                            new RetriableCommitFailedException(e)));
-                }
-            });
+            return doCommitOffsetsAsync(offsets, callback);
         }
+
+        // we don't know the current coordinator, so try to find it and then send the commit
+        // or fail (we don't want recursive retries which can cause offset commits to arrive
+        // out of order). Note that there may be multiple offset commits chained to the same
+        // coordinator lookup request. This is fine because the listeners will be invoked in
+        // the same order that they were added. Note also that AbstractCoordinator prevents
+        // multiple concurrent coordinator lookup requests.
+        pendingAsyncCommitsQueue.add(doCommitOffsetsAsync(offsets, callback));
 
         // ensure the commit has a chance to be transmitted (without blocking on its completion).
         // Note that commits are treated as heartbeats by the coordinator, so there is no need to
         // explicitly allow heartbeats through delayed task execution.
-        client.pollNoWakeup();
+        // client.pollNoWakeup(); let the BT handle the poll here
         return future;
     }
 
     private RequestFuture<Void> doCommitOffsetsAsync(final Map<TopicPartition, OffsetAndMetadata> offsets, final OffsetCommitCallback callback) {
         RequestFuture<Void> future = sendOffsetCommitRequest(offsets);
+        /* // TODO: polling thread handling
         final OffsetCommitCallback cb = callback == null ? defaultOffsetCommitCallback : callback;
         future.addListener(new RequestFutureListener<Void>() {
             @Override
@@ -1072,70 +1036,8 @@ public final class AsyncConsumerCoordinator extends AbstractAsyncCoordinator {
                 }
             }
         });
+         */
         return future;
-    }
-
-    /**
-     * Commit offsets synchronously. This method will retry until the commit completes successfully
-     * or an unrecoverable error is encountered.
-     * @param offsets The offsets to be committed
-     * @throws org.apache.kafka.common.errors.AuthorizationException if the consumer is not authorized to the group
-     *             or to any of the specified partitions. See the exception for more details
-     * @throws CommitFailedException if an unrecoverable error occurs before the commit can be completed
-     * @throws FencedInstanceIdException if a static member gets fenced
-     * @return If the offset commit was successfully sent and a successful response was received from
-     *         the coordinator
-     */
-    public boolean commitOffsetsSync(Map<TopicPartition, OffsetAndMetadata> offsets, Timer timer) {
-        invokeCompletedOffsetCommitCallbacks();
-
-        if (offsets.isEmpty())
-            return true;
-
-        do {
-            if (coordinatorUnknownAndUnready()) {
-                return false;
-            }
-
-            RequestFuture<Void> future = sendOffsetCommitRequest(offsets);
-            client.poll(future, timer);
-
-            // We may have had in-flight offset commits when the synchronous commit began. If so, ensure that
-            // the corresponding callbacks are invoked prior to returning in order to preserve the order that
-            // the offset commits were applied.
-            invokeCompletedOffsetCommitCallbacks();
-
-            if (future.succeeded()) {
-                if (interceptors != null)
-                    interceptors.onCommit(offsets);
-                return true;
-            }
-
-            if (future.failed() && !future.isRetriable())
-                throw future.exception();
-
-            timer.sleep(rebalanceConfig.retryBackoffMs);
-        } while (timer.notExpired());
-
-        return false;
-    }
-
-    private void maybeAutoCommitOffsetsSync(Timer timer) {
-        if (autoCommitEnabled) {
-            Map<TopicPartition, OffsetAndMetadata> allConsumedOffsets = subscriptions.allConsumed();
-            try {
-                log.debug("Sending synchronous auto-commit of offsets {}", allConsumedOffsets);
-                if (!commitOffsetsSync(allConsumedOffsets, timer))
-                    log.debug("Auto-commit of offsets {} timed out before completion", allConsumedOffsets);
-            } catch (WakeupException | InterruptException e) {
-                log.debug("Auto-commit of offsets {} was interrupted before completion", allConsumedOffsets);
-                // rethrow wakeups since they are triggered by the user
-                throw e;
-            } catch (Exception e) {
-                // consistent with async auto-commit failures, we do not propagate the exception
-                log.warn("Synchronous auto-commit of offsets {} failed: {}", allConsumedOffsets, e.getMessage());
-            }
-        }
     }
 
     public void maybeAutoCommitOffsetsAsync(long now) {
@@ -1173,13 +1075,6 @@ public final class AsyncConsumerCoordinator extends AbstractAsyncCoordinator {
         return null;
     }
 
-    private class DefaultOffsetCommitCallback implements OffsetCommitCallback {
-        @Override
-        public void onComplete(Map<TopicPartition, OffsetAndMetadata> offsets, Exception exception) {
-            if (exception != null)
-                log.error("Offset commit with offsets {} failed", offsets, exception);
-        }
-    }
 
     /**
      * Commit offsets for the specified list of topics and partitions. This is a non-blocking call
@@ -1321,8 +1216,8 @@ public final class AsyncConsumerCoordinator extends AbstractAsyncCoordinator {
                                 future.raise(error);
                             } else {
                                 KafkaException exception;
-                                synchronized (AsyncConsumerCoordinator.this) {
-                                    if (AsyncConsumerCoordinator.this.state == MemberState.PREPARING_REBALANCE) {
+                                synchronized (ConsumerAsyncCoordinator.this) {
+                                    if (ConsumerAsyncCoordinator.this.state == MemberState.PREPARING_REBALANCE) {
                                         exception = new RebalanceInProgressException("Offset commit cannot be completed since the " +
                                                 "consumer member's old generation is fenced by its group instance id, it is possible that " +
                                                 "this consumer has already participated another rebalance and got a new generation");
@@ -1354,8 +1249,8 @@ public final class AsyncConsumerCoordinator extends AbstractAsyncCoordinator {
                             // only need to reset generation and re-join group if generation has not changed or we are not in rebalancing;
                             // otherwise only raise rebalance-in-progress error
                             KafkaException exception;
-                            synchronized (AsyncConsumerCoordinator.this) {
-                                if (!generationUnchanged() && AsyncConsumerCoordinator.this.state == MemberState.PREPARING_REBALANCE) {
+                            synchronized (ConsumerAsyncCoordinator.this) {
+                                if (!generationUnchanged() && ConsumerAsyncCoordinator.this.state == MemberState.PREPARING_REBALANCE) {
                                     exception = new RebalanceInProgressException("Offset commit cannot be completed since the " +
                                             "consumer member's generation is already stale, meaning it has already participated another rebalance and " +
                                             "got a new generation. You can try completing the rebalance by calling poll() and then retry commit again");

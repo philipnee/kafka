@@ -2,15 +2,21 @@ package org.apache.kafka.clients.consumer;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.GroupRebalanceConfig;
-import org.apache.kafka.clients.consumer.events.InitializationEvent;
-import org.apache.kafka.clients.consumer.events.ServerEvent;
-import org.apache.kafka.clients.consumer.events.PartitionAssignmentServerEvent;
+import org.apache.kafka.clients.consumer.events.AbstractConsumerEvent;
+import org.apache.kafka.clients.consumer.events.CommitEventAbstract;
+import org.apache.kafka.clients.consumer.events.InitializationEventAbstract;
+import org.apache.kafka.clients.consumer.events.AbstractServerEvent;
+import org.apache.kafka.clients.consumer.events.PartitionAssignmentAbstractServerEvent;
+import org.apache.kafka.clients.consumer.internals.ConsumerAsyncCoordinator;
 import org.apache.kafka.clients.consumer.internals.ConsumerBackgroundThread;
 import org.apache.kafka.clients.consumer.internals.ConsumerInterceptors;
+import org.apache.kafka.clients.consumer.internals.RequestFutureListener;
 import org.apache.kafka.clients.consumer.internals.SubscriptionState;
 import org.apache.kafka.common.*;
+import org.apache.kafka.common.errors.FencedInstanceIdException;
 import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.errors.InvalidGroupIdException;
+import org.apache.kafka.common.errors.RetriableException;
 import org.apache.kafka.common.internals.ClusterResourceListeners;
 
 import org.apache.kafka.common.metrics.*;
@@ -25,6 +31,8 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -60,8 +68,14 @@ public class NewKafkaConsumer<K, V> implements Consumer<K, V> {
 
     private ConsumerBackgroundThread<K, V> backgroundThread;
 
-    private BlockingQueue<ServerEvent> serverEventQueue;
-    private BlockingQueue<KafkaConsumerEvent> consumerEventQueue;
+    private BlockingQueue<AbstractServerEvent> serverEventQueue;
+    private BlockingQueue<AbstractConsumerEvent> consumerEventQueue;
+
+    private final ConcurrentLinkedQueue<OffsetCommitCompletion> completedOffsetCommits = new ConcurrentLinkedQueue<>();
+    private AtomicBoolean asyncCommitFenced;
+
+
+
 
     public NewKafkaConsumer(Properties properties) {
         this(properties, null, null);
@@ -133,7 +147,7 @@ public class NewKafkaConsumer<K, V> implements Consumer<K, V> {
                 this.consumerEventQueue);
         System.out.println("pour the wine");
         startBackgroundThread();
-        this.serverEventQueue.add(new InitializationEvent()); // to kick off the background thread
+        this.serverEventQueue.add(new InitializationEventAbstract()); // to kick off the background thread
         this.backgroundThread.wakeup();
     }
 
@@ -244,7 +258,7 @@ public class NewKafkaConsumer<K, V> implements Consumer<K, V> {
             if (this.subscriptionState.assignFromUser(new HashSet<>(partitions)))
                 updateMetadata = true;
 
-            ServerEvent serverEvent = new PartitionAssignmentServerEvent(partitions, updateMetadata);
+            AbstractServerEvent serverEvent = new PartitionAssignmentAbstractServerEvent(partitions, updateMetadata);
             this.serverEventQueue.add(serverEvent);
             this.backgroundThread.wakeup();
         } finally {
@@ -300,17 +314,68 @@ public class NewKafkaConsumer<K, V> implements Consumer<K, V> {
 
     @Override
     public void commitAsync() {
-
+        commitAsync(null);
     }
 
     @Override
     public void commitAsync(OffsetCommitCallback callback) {
-
+        commitAsync(subscriptionState.allConsumed(), callback);
     }
 
     @Override
     public void commitAsync(Map<TopicPartition, OffsetAndMetadata> offsets, OffsetCommitCallback callback) {
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        AbstractServerEvent event = new CommitEventAbstract(offsets, future);
 
+        final OffsetCommitCallback cb = callback == null ? new DefaultOffsetCommitCallback() : callback;
+
+        future.whenComplete( (res, err) -> {
+            if (err == null) {
+                if (interceptors != null)
+                    interceptors.onCommit(offsets);
+                completedOffsetCommits.add(new OffsetCommitCompletion(cb, offsets, null));
+                return;
+            }
+
+            Throwable commitException = err;
+            if (err instanceof RetriableException) {
+                commitException = new RetriableCommitFailedException(err);
+            }
+            completedOffsetCommits.add(new OffsetCommitCompletion(cb, offsets, (Exception) commitException));
+            if (commitException instanceof FencedInstanceIdException) {
+                asyncCommitFenced.set(true);
+            }
+
+        });
+
+        serverEventQueue.add(event);
+    }
+
+    // visible for testing
+    void invokeCompletedOffsetCommitCallbacks() {
+        if (asyncCommitFenced.get()) {
+            /*
+            throw new FencedInstanceIdException("Get fenced exception for group.instance.id "
+                    + rebalanceConfig.groupInstanceId.orElse("unset_instance_id")
+                    + ", current member.id is " + memberId());
+
+             */
+        }
+        while (true) {
+            OffsetCommitCompletion completion = completedOffsetCommits.poll();
+            if (completion == null) {
+                break;
+            }
+            completion.invoke();
+        }
+    }
+
+    private class DefaultOffsetCommitCallback implements OffsetCommitCallback {
+        @Override
+        public void onComplete(Map<TopicPartition, OffsetAndMetadata> offsets, Exception exception) {
+            if (exception != null)
+                log.error("Offset commit with offsets {} failed", offsets, exception);
+        }
     }
 
     @Override
@@ -562,5 +627,22 @@ public class NewKafkaConsumer<K, V> implements Consumer<K, V> {
         MetricsContext metricsContext = new KafkaMetricsContext(JMX_PREFIX,
                 config.originalsWithPrefix(CommonClientConfigs.METRICS_CONTEXT_PREFIX));
         return new Metrics(metricConfig, reporters, time, metricsContext);
+    }
+
+    private static class OffsetCommitCompletion {
+        private final OffsetCommitCallback callback;
+        private final Map<TopicPartition, OffsetAndMetadata> offsets;
+        private final Exception exception;
+
+        private OffsetCommitCompletion(OffsetCommitCallback callback, Map<TopicPartition, OffsetAndMetadata> offsets, Exception exception) {
+            this.callback = callback;
+            this.offsets = offsets;
+            this.exception = exception;
+        }
+
+        public void invoke() {
+            if (callback != null)
+                callback.onComplete(offsets, exception);
+        }
     }
 }

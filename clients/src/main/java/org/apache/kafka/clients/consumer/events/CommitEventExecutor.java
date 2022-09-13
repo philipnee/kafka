@@ -1,6 +1,5 @@
 package org.apache.kafka.clients.consumer.events;
 
-import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.internals.ConsumerCoordinator;
 import org.apache.kafka.common.utils.Time;
 
@@ -10,7 +9,7 @@ public class CommitEventExecutor extends ServerEventExecutor {
 
     private final Time time;
     private final ConsumerCoordinator coordinator;
-    private CommitEvent event;
+    private CommitEventAbstract event;
 
     public CommitEventExecutor(Time time,
                                ConsumerCoordinator coordinator) {
@@ -19,7 +18,7 @@ public class CommitEventExecutor extends ServerEventExecutor {
     }
     @Override
     public Void call() throws Exception {
-        this.event = (CommitEvent)  this.serverEvent;
+        this.event = (CommitEventAbstract)  this.serverEvent;
         // TODO: implement callback
         coordinator.commitOffsetsAsync(new HashMap<>(event.consumedOffsets), null);
         return null;

@@ -2,7 +2,6 @@ package org.apache.kafka.clients.consumer.events;
 
 import org.apache.kafka.clients.Metadata;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.internals.ConsumerCoordinator;
 import org.apache.kafka.clients.consumer.internals.ConsumerNetworkClient;
 import org.apache.kafka.clients.consumer.internals.Fetch;
@@ -27,7 +26,7 @@ public class FetchEventExecutor<K, V> extends ServerEventExecutor {
     private final SubscriptionState subscriptionState;
     private final Logger log;
     private final long retryBackoffMs;
-    private FetchEvent event;
+    private FetchEventAbstract event;
     private boolean cachedSubscriptionHasAllFetchPositions;
 
     public FetchEventExecutor(Time time,
@@ -157,7 +156,7 @@ public class FetchEventExecutor<K, V> extends ServerEventExecutor {
 
     @Override
     public Void call() throws Exception {
-        this.event = (FetchEvent)  this.serverEvent;
+        this.event = (FetchEventAbstract)  this.serverEvent;
         if(this.subscriptionState.hasNoSubscriptionOrUserAssignment()) {
             throw new IllegalStateException("Consumer is not subscribed to any topics or assigned any partitions");
         }

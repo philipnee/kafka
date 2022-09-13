@@ -1,10 +1,10 @@
 package org.apache.kafka.clients.consumer.events;
 
-abstract public class ServerEvent {
+abstract public class AbstractServerEvent {
     private final ServerEventType eventType;
     private boolean requireCoordinator = false;
 
-    public ServerEvent(ServerEventType eventType, boolean requireCoordinator) {
+    public AbstractServerEvent(ServerEventType eventType, boolean requireCoordinator) {
        this.eventType = eventType;
        this.requireCoordinator = requireCoordinator;
     }
