@@ -3,9 +3,9 @@ package org.apache.kafka.clients.consumer.events;
 import java.util.concurrent.Callable;
 
 abstract public class ServerEventExecutor implements Callable<Void> {
-    AbstractServerEvent serverEvent;
+    ServerEvent serverEvent;
 
-    public void run(AbstractServerEvent event) { //TODO: return type
+    public void run(ServerEvent event) { //TODO: return type
         try {
             this.serverEvent = event;
 

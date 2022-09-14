@@ -59,14 +59,13 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
     private IsolationLevel isolationLevel;
     private final Heartbeat heartbeat;
 
-    private BlockingQueue<AbstractServerEvent> serverEventQueue;
-    private BlockingQueue<AbstractConsumerEvent> consumerEventQueue;
+    private BlockingQueue<ServerEvent> serverEventQueue;
+    private BlockingQueue<ConsumerEvent> consumerEventQueue;
 
     private Map<ServerEventType, ServerEventExecutor> eventExecutorRegistry;
 
     private AtomicBoolean shouldWakeup = new AtomicBoolean(false);
 
-    private boolean shouldHeartBeat = false;
     private final AtomicReference<RuntimeException> failed = new AtomicReference<>(null);
     private final ConcurrentLinkedQueue<ConsumerAsyncCoordinator.OffsetCommitCompletion> completedOffsetCommits;
 
@@ -74,8 +73,8 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
                                     SubscriptionState subscriptions, // TODO: it is currently a shared state between polling and background thread
                                     ClusterResourceListeners clusterResourceListeners,
                                     Metrics metrics,
-                                    BlockingQueue<AbstractServerEvent> serverEventQueue,
-                                    BlockingQueue<AbstractConsumerEvent> consumerEventQueue) {
+                                    BlockingQueue<ServerEvent> serverEventQueue,
+                                    BlockingQueue<ConsumerEvent> consumerEventQueue) {
         super(CONSUMER_BACKGROUND_THREAD_PREFIX, true);
         configuration(config);
         this.time = Time.SYSTEM;
@@ -191,7 +190,7 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
         try {
             while (!closed) {
                 if (shouldWakeup.get() || !serverEventQueue.isEmpty()) {
-                    Optional<AbstractServerEvent> event = Optional.ofNullable(serverEventQueue.poll());
+                    Optional<ServerEvent> event = Optional.ofNullable(serverEventQueue.poll());
                     runStateMachine(event);
 
                     if (event.isPresent() && eventExecutorRegistry.containsKey(event.get().getEventType())) {
@@ -223,9 +222,9 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
         }
     }
 
-    private void runStateMachine(Optional<AbstractServerEvent> optionalEvent) throws InterruptedException {
+    private void runStateMachine(Optional<ServerEvent> optionalEvent) throws InterruptedException {
         if(optionalEvent.isPresent()) {
-            AbstractServerEvent event = optionalEvent.get();
+            ServerEvent event = optionalEvent.get();
             if (event.isRequireCoordinator()) {
                 this.needCoordinator = true;
             }

@@ -4,11 +4,11 @@ import org.apache.kafka.common.TopicPartition;
 
 import java.util.Collection;
 
-public class PartitionAssignmentAbstractServerEvent extends AbstractServerEvent {
+public class PartitionAssignmentEvent extends AbstractServerEvent implements ServerEvent {
     private final Collection<TopicPartition> partitions;
     private final boolean shouldUpdateMetadata;
 
-    public PartitionAssignmentAbstractServerEvent(Collection<TopicPartition> partitions, boolean shouldUpdateMetadata) {
+    public PartitionAssignmentEvent(Collection<TopicPartition> partitions, boolean shouldUpdateMetadata) {
         super(ServerEventType.ASSIGN, true);
         this.partitions = partitions;
         this.shouldUpdateMetadata = shouldUpdateMetadata;

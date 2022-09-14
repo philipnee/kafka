@@ -9,7 +9,7 @@ public class CommitEventExecutor extends ServerEventExecutor {
 
     private final Time time;
     private final ConsumerCoordinator coordinator;
-    private CommitEventAbstract event;
+    private CommitEvent event;
 
     public CommitEventExecutor(Time time,
                                ConsumerCoordinator coordinator) {
@@ -18,7 +18,7 @@ public class CommitEventExecutor extends ServerEventExecutor {
     }
     @Override
     public Void call() throws Exception {
-        this.event = (CommitEventAbstract)  this.serverEvent;
+        this.event = (CommitEvent)  this.serverEvent;
         // TODO: implement callback
         coordinator.commitOffsetsAsync(new HashMap<>(event.consumedOffsets), null);
         return null;

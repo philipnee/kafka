@@ -11,7 +11,7 @@ public class PartitionAssignmentEventExecutor<K, V> extends ServerEventExecutor 
     private final ConsumerAsyncCoordinator coordinator;
     private final Time time;
 
-    private PartitionAssignmentAbstractServerEvent event;
+    private PartitionAssignmentEvent event;
 
     public PartitionAssignmentEventExecutor(Time time,
                                             Metadata metadata,
@@ -26,7 +26,7 @@ public class PartitionAssignmentEventExecutor<K, V> extends ServerEventExecutor 
     @Override
     public Void call() throws Exception {
         System.out.println("executing assign");
-        this.event = (PartitionAssignmentAbstractServerEvent) this.serverEvent;
+        this.event = (PartitionAssignmentEvent) this.serverEvent;
         fetcher.clearBufferedDataForUnassignedPartitions(event.getPartitions());
         if(coordinator != null)
             this.coordinator.maybeAutoCommitOffsetsAsync(time.milliseconds());

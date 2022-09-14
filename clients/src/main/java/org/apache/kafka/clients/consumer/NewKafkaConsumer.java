@@ -2,15 +2,14 @@ package org.apache.kafka.clients.consumer;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.GroupRebalanceConfig;
-import org.apache.kafka.clients.consumer.events.AbstractConsumerEvent;
-import org.apache.kafka.clients.consumer.events.CommitEventAbstract;
-import org.apache.kafka.clients.consumer.events.InitializationEventAbstract;
+import org.apache.kafka.clients.consumer.events.CommitEvent;
+import org.apache.kafka.clients.consumer.events.ConsumerEvent;
+import org.apache.kafka.clients.consumer.events.InitializationEvent;
 import org.apache.kafka.clients.consumer.events.AbstractServerEvent;
-import org.apache.kafka.clients.consumer.events.PartitionAssignmentAbstractServerEvent;
-import org.apache.kafka.clients.consumer.internals.ConsumerAsyncCoordinator;
+import org.apache.kafka.clients.consumer.events.PartitionAssignmentEvent;
+import org.apache.kafka.clients.consumer.events.ServerEvent;
 import org.apache.kafka.clients.consumer.internals.ConsumerBackgroundThread;
 import org.apache.kafka.clients.consumer.internals.ConsumerInterceptors;
-import org.apache.kafka.clients.consumer.internals.RequestFutureListener;
 import org.apache.kafka.clients.consumer.internals.SubscriptionState;
 import org.apache.kafka.common.*;
 import org.apache.kafka.common.errors.FencedInstanceIdException;
@@ -68,8 +67,8 @@ public class NewKafkaConsumer<K, V> implements Consumer<K, V> {
 
     private ConsumerBackgroundThread<K, V> backgroundThread;
 
-    private BlockingQueue<AbstractServerEvent> serverEventQueue;
-    private BlockingQueue<AbstractConsumerEvent> consumerEventQueue;
+    private BlockingQueue<ServerEvent> serverEventQueue;
+    private BlockingQueue<ConsumerEvent> consumerEventQueue;
 
     private final ConcurrentLinkedQueue<OffsetCommitCompletion> completedOffsetCommits = new ConcurrentLinkedQueue<>();
     private AtomicBoolean asyncCommitFenced;
@@ -147,7 +146,7 @@ public class NewKafkaConsumer<K, V> implements Consumer<K, V> {
                 this.consumerEventQueue);
         System.out.println("pour the wine");
         startBackgroundThread();
-        this.serverEventQueue.add(new InitializationEventAbstract()); // to kick off the background thread
+        this.serverEventQueue.add(new InitializationEvent()); // to kick off the background thread
         this.backgroundThread.wakeup();
     }
 
@@ -258,7 +257,7 @@ public class NewKafkaConsumer<K, V> implements Consumer<K, V> {
             if (this.subscriptionState.assignFromUser(new HashSet<>(partitions)))
                 updateMetadata = true;
 
-            AbstractServerEvent serverEvent = new PartitionAssignmentAbstractServerEvent(partitions, updateMetadata);
+            ServerEvent serverEvent = new PartitionAssignmentEvent(partitions, updateMetadata);
             this.serverEventQueue.add(serverEvent);
             this.backgroundThread.wakeup();
         } finally {
@@ -325,7 +324,7 @@ public class NewKafkaConsumer<K, V> implements Consumer<K, V> {
     @Override
     public void commitAsync(Map<TopicPartition, OffsetAndMetadata> offsets, OffsetCommitCallback callback) {
         CompletableFuture<Void> future = new CompletableFuture<>();
-        AbstractServerEvent event = new CommitEventAbstract(offsets, future);
+        ServerEvent event = new CommitEvent(offsets);
 
         final OffsetCommitCallback cb = callback == null ? new DefaultOffsetCommitCallback() : callback;
 
