@@ -5,6 +5,7 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor;
 import org.apache.kafka.clients.consumer.RetriableCommitFailedException;
 import org.apache.kafka.clients.consumer.events.*;
+import org.apache.kafka.clients.consumer.internals.consts.ConsumerConsts;
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.errors.AuthenticationException;
@@ -133,6 +134,8 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
         // contains a bunch of event executors, it is unmodifiable after initialized
         this.eventExecutorRegistry = initializeEventExecutorRegistry();
         this.completedOffsetCommits = new ConcurrentLinkedQueue<>();
+
+        stateMachine.transitionTo(BackgroundStates.INITIALIZED);
     }
 
     private Map<ServerEventType, ServerEventExecutor> initializeEventExecutorRegistry() {
@@ -189,7 +192,7 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
         try {
             while (!closed) {
                 if (!inflightEvent.isPresent() && !serverEventQueue.isEmpty()) {
-                    inflightEvent = Optional.ofNullable(serverEventQueue.poll());
+                    inflightEvent = Optional.of(serverEventQueue.poll());
                 }
 
                 if (inflightEvent.isPresent()) {
@@ -202,7 +205,6 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
                 this.networkClient.pollNoWakeup();
                 this.wait(retryBackoffMs);
             }
-
         } catch (AuthenticationException e) {
             log.error("An authentication error occurred in the background thread", e);
             this.failed.set(e);
@@ -219,9 +221,9 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
                 this.failed.set((RuntimeException) e);
             else
                 this.failed.set(new RuntimeException(e));
-        } finally {
-            log.debug("Heartbeat thread has closed");
         }
+
+        close();
     }
 
     private void maybeSendHeartbeat() {
@@ -241,7 +243,7 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
                 break;
             case STABLE:
                 if (coordinator.coordinatorUnknown()) {
-                    maybeTransitionToInitialized();
+                    stateMachine.transitionTo(BackgroundStates.INITIALIZED);
                     log.warn("lost coordinator");
                     break;
                 }
@@ -249,16 +251,11 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
                 maybeSendHeartbeat();
                 break;
             case DOWN:
-                maybeTransitionToInitialized();
                 log.info("closed");
                 break;
         }
 
         return;
-    }
-
-    private void maybeTransitionToInitialized() {
-        stateMachine.transitionTo(BackgroundStates.INITIALIZED);
     }
 
     private void maybeTransitionToCoordinatorDiscovery(boolean requireCoordinator) {
@@ -304,15 +301,15 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
     }
 
     private void maybeTransitionToStable() {
+        // if unknownCoordinator, transition to initialized
         if(coordinator.coordinatorUnknown()) {
-            // TODO: make it retriable
-            // do something
             log.warn("Lost coordinator, transition back to INITIALIZED");
             stateMachine.transitionTo(BackgroundStates.INITIALIZED);
             return;
         }
 
         try {
+            // try to discover coordinator, once discovered, transition to STABLE
             if (coordinator.ensureCoordinatorReady()) {
                 stateMachine.transitionTo(BackgroundStates.STABLE);
             }
@@ -336,13 +333,17 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
             firstException.compareAndSet(null, t);
             log.error("Failed to close coordinator", t);
             t.printStackTrace();
+        } finally {
+            this.networkClient.poll(time.timer(ConsumerConsts.DEFAULT_CLOSE_TIMEOUT_MS));
         }
+
         this.shouldWakeup.set(false);
         this.stateMachine.transitionTo(BackgroundStates.DOWN);
         org.apache.kafka.common.utils.Utils.closeQuietly(fetcher, "fetcher", firstException);
         org.apache.kafka.common.utils.Utils.closeQuietly(metrics, "consumer metrics", firstException);
         org.apache.kafka.common.utils.Utils.closeQuietly(networkClient, "consumer network client", firstException);
         AppInfoParser.unregisterAppInfo(JMX_PREFIX, clientId, metrics);
+
         log.debug("Kafka consumer has been closed");
         Throwable exception = firstException.get();
         if (exception != null) { // TODO: swallo exception
