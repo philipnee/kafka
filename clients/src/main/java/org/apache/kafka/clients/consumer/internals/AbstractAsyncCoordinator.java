@@ -568,7 +568,7 @@ public abstract class AbstractAsyncCoordinator implements Closeable {
         return heartbeatFuture.isDone() && !heartbeatFuture.failed();
     }
 
-    private RequestFuture<Void> sendHeartbeat() {
+   private RequestFuture<Void> sendHeartbeat() {
         heartbeat.sentHeartbeat(time.milliseconds());
         final RequestFuture<Void> heartbeatFuture = sendHeartbeatRequest();
         heartbeatFuture.addListener(new RequestFutureListener<Void>() {

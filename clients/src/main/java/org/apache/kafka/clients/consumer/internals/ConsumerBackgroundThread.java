@@ -3,7 +3,6 @@ package org.apache.kafka.clients.consumer.internals;
 import org.apache.kafka.clients.*;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor;
-import org.apache.kafka.clients.consumer.NewKafkaConsumer;
 import org.apache.kafka.clients.consumer.RetriableCommitFailedException;
 import org.apache.kafka.clients.consumer.events.*;
 import org.apache.kafka.common.IsolationLevel;
@@ -41,7 +40,6 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
 
     private BackgroundStateMachine stateMachine;
     private boolean closed = false;
-    private boolean needCoordinator = false;
     private long retryBackoffMs;
     private String clientId;
 
@@ -68,6 +66,7 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
 
     private final AtomicReference<RuntimeException> failed = new AtomicReference<>(null);
     private final ConcurrentLinkedQueue<ConsumerAsyncCoordinator.OffsetCommitCompletion> completedOffsetCommits;
+    private Optional<ServerEvent> inflightEvent = Optional.empty();
 
     public ConsumerBackgroundThread(ConsumerConfig config,
                                     SubscriptionState subscriptions, // TODO: it is currently a shared state between polling and background thread
@@ -189,16 +188,19 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
     public void run() {
         try {
             while (!closed) {
-                if (shouldWakeup.get() || !serverEventQueue.isEmpty()) {
-                    Optional<ServerEvent> event = Optional.ofNullable(serverEventQueue.poll());
-                    runStateMachine(event);
-
-                    if (event.isPresent() && eventExecutorRegistry.containsKey(event.get().getEventType())) {
-                        ServerEventExecutor executor = eventExecutorRegistry.getOrDefault(event.get().getEventType(), new NoopEventExecutor());
-                        executor.run(event.get());
-                    }
+                if (!inflightEvent.isPresent() && !serverEventQueue.isEmpty()) {
+                    inflightEvent = Optional.ofNullable(serverEventQueue.poll());
                 }
-                this.networkClient.poll(time.timer(Long.MAX_VALUE));
+
+                if (inflightEvent.isPresent()) {
+                    ServerEvent event = inflightEvent.get();
+                    runStateMachine(event);
+                    ServerEventExecutor executor = eventExecutorRegistry.getOrDefault(event.getEventType(), new NoopEventExecutor());
+                    executor.run(event);
+                }
+
+                this.networkClient.pollNoWakeup();
+                this.wait(retryBackoffMs);
             }
 
         } catch (AuthenticationException e) {
@@ -222,50 +224,50 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
         }
     }
 
-    private void runStateMachine(Optional<ServerEvent> optionalEvent) throws InterruptedException {
-        if(optionalEvent.isPresent()) {
-            ServerEvent event = optionalEvent.get();
-            if (event.isRequireCoordinator()) {
-                this.needCoordinator = true;
-            }
+    private void maybeSendHeartbeat() {
+        if (coordinator.shouldSendHeartbeat()) {
+            coordinator.sendHeartbeatRequest();
         }
-        while(true) {
-            switch (stateMachine.getCurrentState()) {
-                case INITIALIZED:
-                    if (!needCoordinator) {
-                        // no coordinator is required
-                       return;
-                    }
-                    maybeTransitionToCoordinatorDiscovery();
-                    break;
-                case COORDINATOR_DISCOVERY:
-                    // in progress of finding the coordinator
-                    maybeTransitionToStable();
-                    break;
-                case STABLE:
-                    if (coordinator.coordinatorUnknown()) {
-                        maybeTransitionToInitialized();
-                        log.warn("lost coordinator");
-                        break;
-                    }
-                    coordinator.poll();
+    }
 
-                    return;
-                case DOWN:
+    private void runStateMachine(ServerEvent event) throws InterruptedException {
+        switch (stateMachine.getCurrentState()) {
+            case INITIALIZED:
+                maybeTransitionToCoordinatorDiscovery(event.isRequireCoordinator());
+                break;
+            case COORDINATOR_DISCOVERY:
+                // in progress of finding the coordinator
+                maybeTransitionToStable();
+                break;
+            case STABLE:
+                if (coordinator.coordinatorUnknown()) {
                     maybeTransitionToInitialized();
-                    log.info("closed");
+                    log.warn("lost coordinator");
                     break;
-            }
+                }
+                this.coordinator.poll();
+                maybeSendHeartbeat();
+                break;
+            case DOWN:
+                maybeTransitionToInitialized();
+                log.info("closed");
+                break;
         }
+
+        return;
     }
 
     private void maybeTransitionToInitialized() {
         stateMachine.transitionTo(BackgroundStates.INITIALIZED);
     }
 
-    private void maybeTransitionToCoordinatorDiscovery() {
+    private void maybeTransitionToCoordinatorDiscovery(boolean requireCoordinator) {
+        if (!requireCoordinator) {
+            return;
+        }
+
         maybeHandleUncommittedOffsets();
-        if(coordinator.coordinatorUnknown() && !coordinator.ensureCoordinatorReady()) {
+        if(coordinator.coordinatorUnknown()) {
             stateMachine.transitionTo(BackgroundStates.INITIALIZED);
             return;
         }
@@ -305,13 +307,19 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
         if(coordinator.coordinatorUnknown()) {
             // TODO: make it retriable
             // do something
-            log.error("Unable to find coordinator");
+            log.warn("Lost coordinator, transition back to INITIALIZED");
             stateMachine.transitionTo(BackgroundStates.INITIALIZED);
             return;
         }
-        this.needCoordinator = false;
-        stateMachine.transitionTo(BackgroundStates.STABLE);
-        return;
+
+        try {
+            if (coordinator.ensureCoordinatorReady()) {
+                stateMachine.transitionTo(BackgroundStates.STABLE);
+            }
+        } catch (Exception e) {
+            log.warn("Failed discoverying coordinator");
+            stateMachine.transitionTo(BackgroundStates.INITIALIZED);
+        }
     }
 
     @Override
