@@ -114,9 +114,9 @@ public abstract class AbstractAsyncCoordinator implements Closeable {
 
     protected enum MemberState {
         UNJOINED,             // the client is not part of a group
-        PREPARING_REBALANCE,  // the client has sent the join group request, but have not received response
         COMMITTING_OFFSET,
         REVOKING_PARTITIONS,
+        PREPARING_REBALANCE,
         COMPLETING_REBALANCE, // the client has received join group response, but have not received assignment
         STABLE, DOWN;               // the client has joined and is sending heartbeats
 
@@ -138,7 +138,7 @@ public abstract class AbstractAsyncCoordinator implements Closeable {
 
     private Node coordinator = null;
     private String rejoinReason = "";
-    private boolean rejoinNeeded = true;
+    private boolean rejoinNeeded = false;
     private boolean needsJoinPrepare = true;
     private RequestFuture<ByteBuffer> joinFuture = null;
     private RequestFuture<Void> findCoordinatorFuture = null;
@@ -248,8 +248,6 @@ public abstract class AbstractAsyncCoordinator implements Closeable {
         }
 
         final RequestFuture<Void> future = lookupCoordinator();
-        client.poll(future);
-
         if (!future.isDone()) {
             // ran out of time
             return false;
@@ -366,11 +364,14 @@ public abstract class AbstractAsyncCoordinator implements Closeable {
                  //should not initiateJoinGroup if needsJoinPrepare still is true
                  return false;
              }
+             state = MemberState.REVOKING_PARTITIONS;
          }
 
-         state = MemberState.REVOKING_PARTITIONS;
-         log.debug("Revoking partitions before joinGroup");
-         revokePartitions(generation.generationId, generation.memberId);
+         if(state == MemberState.REVOKING_PARTITIONS) {
+             log.debug("Revoking partitions before joinGroup");
+             revokePartitions(generation.generationId, generation.memberId);
+             return false;
+         }
 
          final RequestFuture<ByteBuffer> future = initiateJoinGroup();
          client.poll(future);

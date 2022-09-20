@@ -794,9 +794,6 @@ public final class ConsumerAsyncCoordinator extends AbstractAsyncCoordinator {
         if (exception != null) {
             throw new KafkaException("User rebalance callback throws an error", exception);
         }
-
-        isLeader = false;
-        subscriptions.resetGroupSubscription();
     }
 
     @Override
