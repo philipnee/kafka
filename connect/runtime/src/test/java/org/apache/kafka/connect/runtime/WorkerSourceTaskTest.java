@@ -50,7 +50,6 @@ import org.apache.kafka.connect.storage.StringConverter;
 import org.apache.kafka.connect.util.Callback;
 import org.apache.kafka.connect.util.ConnectorTaskId;
 import org.apache.kafka.connect.util.ParameterizedTest;
-import org.apache.kafka.connect.util.ThreadedTest;
 import org.apache.kafka.connect.util.TopicAdmin;
 import org.apache.kafka.connect.util.TopicCreationGroup;
 import org.easymock.Capture;
@@ -58,6 +57,7 @@ import org.easymock.EasyMock;
 import org.easymock.IAnswer;
 import org.easymock.IExpectationSetters;
 import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.powermock.api.easymock.PowerMock;
@@ -68,6 +68,7 @@ import org.powermock.modules.junit4.PowerMockRunner;
 import org.powermock.modules.junit4.PowerMockRunnerDelegate;
 import org.powermock.reflect.Whitebox;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collection;
@@ -105,7 +106,7 @@ import static org.junit.Assert.assertTrue;
                   "org.apache.log4j.*"})
 @RunWith(PowerMockRunner.class)
 @PowerMockRunnerDelegate(ParameterizedTest.class)
-public class WorkerSourceTaskTest extends ThreadedTest {
+public class WorkerSourceTaskTest {
     private static final String TOPIC = "topic";
     private static final String OTHER_TOPIC = "other-topic";
     private static final Map<String, Object> PARTITION = Collections.singletonMap("key", "partition".getBytes());
@@ -167,9 +168,8 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         this.enableTopicCreation = enableTopicCreation;
     }
 
-    @Override
+    @Before
     public void setup() {
-        super.setup();
         Map<String, String> workerProps = workerProps();
         plugins = new Plugins(workerProps);
         config = new StandaloneConfig(workerProps);
@@ -269,12 +269,7 @@ public class WorkerSourceTaskTest extends ThreadedTest {
     public void testPause() throws Exception {
         createWorkerTask();
 
-        sourceTask.initialize(EasyMock.anyObject(SourceTaskContext.class));
-        EasyMock.expectLastCall();
-        sourceTask.start(TASK_PROPS);
-        EasyMock.expectLastCall();
-        statusListener.onStartup(taskId);
-        EasyMock.expectLastCall();
+        expectCleanStartup();
 
         AtomicInteger count = new AtomicInteger(0);
         CountDownLatch pollLatch = expectPolls(10, count);
@@ -323,12 +318,7 @@ public class WorkerSourceTaskTest extends ThreadedTest {
     public void testPollsInBackground() throws Exception {
         createWorkerTask();
 
-        sourceTask.initialize(EasyMock.anyObject(SourceTaskContext.class));
-        EasyMock.expectLastCall();
-        sourceTask.start(TASK_PROPS);
-        EasyMock.expectLastCall();
-        statusListener.onStartup(taskId);
-        EasyMock.expectLastCall();
+        expectCleanStartup();
 
         final CountDownLatch pollLatch = expectPolls(10);
         // In this test, we don't flush, so nothing goes any further than the offset writer
@@ -366,12 +356,7 @@ public class WorkerSourceTaskTest extends ThreadedTest {
     public void testFailureInPoll() throws Exception {
         createWorkerTask();
 
-        sourceTask.initialize(EasyMock.anyObject(SourceTaskContext.class));
-        EasyMock.expectLastCall();
-        sourceTask.start(TASK_PROPS);
-        EasyMock.expectLastCall();
-        statusListener.onStartup(taskId);
-        EasyMock.expectLastCall();
+        expectCleanStartup();
 
         final CountDownLatch pollLatch = new CountDownLatch(1);
         final RuntimeException exception = new RuntimeException();
@@ -408,12 +393,7 @@ public class WorkerSourceTaskTest extends ThreadedTest {
     public void testFailureInPollAfterCancel() throws Exception {
         createWorkerTask();
 
-        sourceTask.initialize(EasyMock.anyObject(SourceTaskContext.class));
-        EasyMock.expectLastCall();
-        sourceTask.start(TASK_PROPS);
-        EasyMock.expectLastCall();
-        statusListener.onStartup(taskId);
-        EasyMock.expectLastCall();
+        expectCleanStartup();
 
         final CountDownLatch pollLatch = new CountDownLatch(1);
         final CountDownLatch workerCancelLatch = new CountDownLatch(1);
@@ -456,12 +436,7 @@ public class WorkerSourceTaskTest extends ThreadedTest {
     public void testFailureInPollAfterStop() throws Exception {
         createWorkerTask();
 
-        sourceTask.initialize(EasyMock.anyObject(SourceTaskContext.class));
-        EasyMock.expectLastCall();
-        sourceTask.start(TASK_PROPS);
-        EasyMock.expectLastCall();
-        statusListener.onStartup(taskId);
-        EasyMock.expectLastCall();
+        expectCleanStartup();
 
         final CountDownLatch pollLatch = new CountDownLatch(1);
         final CountDownLatch workerStopLatch = new CountDownLatch(1);
@@ -502,12 +477,7 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         // Test that the task handles an empty list of records
         createWorkerTask();
 
-        sourceTask.initialize(EasyMock.anyObject(SourceTaskContext.class));
-        EasyMock.expectLastCall();
-        sourceTask.start(TASK_PROPS);
-        EasyMock.expectLastCall();
-        statusListener.onStartup(taskId);
-        EasyMock.expectLastCall();
+        expectCleanStartup();
 
         // We'll wait for some data, then trigger a flush
         final CountDownLatch pollLatch = expectEmptyPolls(1, new AtomicInteger());
@@ -543,12 +513,7 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         // Test that the task commits properly when prompted
         createWorkerTask();
 
-        sourceTask.initialize(EasyMock.anyObject(SourceTaskContext.class));
-        EasyMock.expectLastCall();
-        sourceTask.start(TASK_PROPS);
-        EasyMock.expectLastCall();
-        statusListener.onStartup(taskId);
-        EasyMock.expectLastCall();
+        expectCleanStartup();
 
         // We'll wait for some data, then trigger a flush
         final CountDownLatch pollLatch = expectPolls(1);
@@ -589,12 +554,7 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         // Test that the task commits properly when prompted
         createWorkerTask();
 
-        sourceTask.initialize(EasyMock.anyObject(SourceTaskContext.class));
-        EasyMock.expectLastCall();
-        sourceTask.start(TASK_PROPS);
-        EasyMock.expectLastCall();
-        statusListener.onStartup(taskId);
-        EasyMock.expectLastCall();
+        expectCleanStartup();
 
         // We'll wait for some data, then trigger a flush
         final CountDownLatch pollLatch = expectPolls(1);
@@ -736,24 +696,39 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         createWorkerTaskWithErrorToleration();
         expectTopicCreation(TOPIC);
 
+        //Use different offsets for each record so we can verify all were committed
+        final Map<String, Object> offset2 = Collections.singletonMap("key", 13);
+
         // send two records
         // record 1 will succeed
         // record 2 will invoke the producer's failure callback, but ignore the exception via retryOperator
         // and no ConnectException will be thrown
         SourceRecord record1 = new SourceRecord(PARTITION, OFFSET, TOPIC, 1, KEY_SCHEMA, KEY, RECORD_SCHEMA, RECORD);
-        SourceRecord record2 = new SourceRecord(PARTITION, OFFSET, TOPIC, 2, KEY_SCHEMA, KEY, RECORD_SCHEMA, RECORD);
-
+        SourceRecord record2 = new SourceRecord(PARTITION, offset2, TOPIC, 2, KEY_SCHEMA, KEY, RECORD_SCHEMA, RECORD);
+        expectOffsetFlush(true);
         expectSendRecordOnce();
         expectSendRecordProducerCallbackFail();
         sourceTask.commitRecord(EasyMock.anyObject(SourceRecord.class), EasyMock.isNull());
-        EasyMock.expectLastCall();
+
+        //As of KAFKA-14079 all offsets should be committed, even for failed records (if ignored)
+        //Only the last offset will be passed to the method as everything up to that point is committed
+        //Before KAFKA-14079 offset 12 would have been passed and not 13 as it would have been unacked
+        offsetWriter.offset(PARTITION, offset2);
+        PowerMock.expectLastCall();
 
         PowerMock.replayAll();
 
+        //Send records and then commit offsets and verify both were committed and no exception
         Whitebox.setInternalState(workerTask, "toSend", Arrays.asList(record1, record2));
         Whitebox.invokeMethod(workerTask, "sendRecords");
+        Whitebox.invokeMethod(workerTask, "updateCommittableOffsets");
+        workerTask.commitOffsets();
 
         PowerMock.verifyAll();
+
+        //Double check to make sure all submitted records were cleared
+        assertEquals(0, ((SubmittedRecords) Whitebox.getInternalState(workerTask,
+                "submittedRecords")).records.size());
     }
 
     @Test
@@ -763,6 +738,8 @@ public class WorkerSourceTaskTest extends ThreadedTest {
 
         createWorkerTask();
 
+        offsetStore.start();
+        EasyMock.expectLastCall();
         sourceTask.initialize(EasyMock.anyObject(SourceTaskContext.class));
         EasyMock.expectLastCall();
         sourceTask.start(TASK_PROPS);
@@ -1088,6 +1065,17 @@ public class WorkerSourceTaskTest extends ThreadedTest {
     private abstract static class TestSourceTask extends SourceTask {
     }
 
+    private void expectCleanStartup() {
+        offsetStore.start();
+        EasyMock.expectLastCall();
+        sourceTask.initialize(EasyMock.anyObject(SourceTaskContext.class));
+        EasyMock.expectLastCall();
+        sourceTask.start(TASK_PROPS);
+        EasyMock.expectLastCall();
+        statusListener.onStartup(taskId);
+        EasyMock.expectLastCall();
+    }
+
     private void expectClose() {
         producer.close(EasyMock.anyObject(Duration.class));
         EasyMock.expectLastCall();
@@ -1102,6 +1090,13 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         EasyMock.expectLastCall();
 
         offsetStore.stop();
+        EasyMock.expectLastCall();
+
+        try {
+            headerConverter.close();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
         EasyMock.expectLastCall();
     }
 
