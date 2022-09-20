@@ -6,6 +6,7 @@ import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor;
 import org.apache.kafka.clients.consumer.RetriableCommitFailedException;
 import org.apache.kafka.clients.consumer.events.*;
 import org.apache.kafka.clients.consumer.internals.consts.ConsumerConsts;
+
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.errors.AuthenticationException;
@@ -343,7 +344,6 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
         org.apache.kafka.common.utils.Utils.closeQuietly(metrics, "consumer metrics", firstException);
         org.apache.kafka.common.utils.Utils.closeQuietly(networkClient, "consumer network client", firstException);
         AppInfoParser.unregisterAppInfo(JMX_PREFIX, clientId, metrics);
-
         log.debug("Kafka consumer has been closed");
         Throwable exception = firstException.get();
         if (exception != null) { // TODO: swallo exception

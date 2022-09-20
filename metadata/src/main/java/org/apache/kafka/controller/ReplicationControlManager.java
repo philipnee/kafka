@@ -125,6 +125,7 @@ import static org.apache.kafka.common.protocol.Errors.INVALID_REQUEST;
 import static org.apache.kafka.common.protocol.Errors.INVALID_UPDATE_VERSION;
 import static org.apache.kafka.common.protocol.Errors.NEW_LEADER_ELECTED;
 import static org.apache.kafka.common.protocol.Errors.NONE;
+import static org.apache.kafka.common.protocol.Errors.NOT_CONTROLLER;
 import static org.apache.kafka.common.protocol.Errors.NO_REASSIGNMENT_IN_PROGRESS;
 import static org.apache.kafka.common.protocol.Errors.OPERATION_NOT_ATTEMPTED;
 import static org.apache.kafka.common.protocol.Errors.TOPIC_AUTHORIZATION_FAILED;
@@ -666,6 +667,12 @@ public class ReplicationControlManager {
                     Replicas.toArray(assignment.brokerIds()), Replicas.toArray(isr),
                     Replicas.NONE, Replicas.NONE, isr.get(0), LeaderRecoveryState.RECOVERED, 0, 0));
             }
+            for (int i = 0; i < newParts.size(); i++) {
+                if (!newParts.containsKey(i)) {
+                    return new ApiError(Errors.INVALID_REPLICA_ASSIGNMENT,
+                            "partitions should be a consecutive 0-based integer sequence");
+                }
+            }
             ApiError error = maybeCheckCreateTopicPolicy(() -> {
                 Map<Integer, List<Integer>> assignments = new HashMap<>();
                 newParts.entrySet().forEach(e -> assignments.put(e.getKey(),
@@ -744,7 +751,7 @@ public class ReplicationControlManager {
                     setIsSensitive(entry.isSensitive()));
             }
             result.setNumPartitions(newParts.size());
-            result.setReplicationFactor((short) newParts.get(0).replicas.length);
+            result.setReplicationFactor((short) newParts.values().iterator().next().replicas.length);
             result.setTopicConfigErrorCode(NONE.code());
         } else {
             result.setTopicConfigErrorCode(TOPIC_AUTHORIZATION_FAILED.code());
@@ -956,7 +963,6 @@ public class ReplicationControlManager {
                     topic,
                     partitionId,
                     partition,
-                    clusterControl::active,
                     context.requestHeader().requestApiVersion(),
                     partitionData);
 
@@ -1048,7 +1054,6 @@ public class ReplicationControlManager {
      * @param topic current topic information store by the replication manager
      * @param partitionId partition id being altered
      * @param partition current partition registration for the partition being altered
-     * @param isEligibleReplica function telling if the replica is acceptable to join the ISR
      * @param partitionData partition data from the alter partition request
      *
      * @return Errors.NONE for valid alter partition data; otherwise the validation error
@@ -1058,7 +1063,6 @@ public class ReplicationControlManager {
         TopicControlInfo topic,
         int partitionId,
         PartitionRegistration partition,
-        Function<Integer, Boolean> isEligibleReplica,
         short requestApiVersion,
         AlterPartitionRequestData.PartitionData partitionData
     ) {
@@ -1068,7 +1072,23 @@ public class ReplicationControlManager {
 
             return UNKNOWN_TOPIC_OR_PARTITION;
         }
-        if (partitionData.leaderEpoch() != partition.leaderEpoch) {
+
+        // If the partition leader has a higher leader/partition epoch, then it is likely
+        // that this node is no longer the active controller. We return NOT_CONTROLLER in
+        // this case to give the leader an opportunity to find the new controller.
+        if (partitionData.leaderEpoch() > partition.leaderEpoch) {
+            log.debug("Rejecting AlterPartition request from node {} for {}-{} because " +
+                    "the current leader epoch is {}, which is greater than the local value {}.",
+                brokerId, topic.name, partitionId, partition.leaderEpoch, partitionData.leaderEpoch());
+            return NOT_CONTROLLER;
+        }
+        if (partitionData.partitionEpoch() > partition.partitionEpoch) {
+            log.debug("Rejecting AlterPartition request from node {} for {}-{} because " +
+                    "the current partition epoch is {}, which is greater than the local value {}.",
+                brokerId, topic.name, partitionId, partition.partitionEpoch, partitionData.partitionEpoch());
+            return NOT_CONTROLLER;
+        }
+        if (partitionData.leaderEpoch() < partition.leaderEpoch) {
             log.debug("Rejecting AlterPartition request from node {} for {}-{} because " +
                     "the current leader epoch is {}, not {}.", brokerId, topic.name,
                     partitionId, partition.leaderEpoch, partitionData.leaderEpoch());
@@ -1082,7 +1102,7 @@ public class ReplicationControlManager {
 
             return INVALID_REQUEST;
         }
-        if (partitionData.partitionEpoch() != partition.partitionEpoch) {
+        if (partitionData.partitionEpoch() < partition.partitionEpoch) {
             log.info("Rejecting AlterPartition request from node {} for {}-{} because " +
                     "the current partition epoch is {}, not {}.", brokerId,
                     topic.name, partitionId, partition.partitionEpoch,
@@ -1125,9 +1145,7 @@ public class ReplicationControlManager {
             return INVALID_REQUEST;
         }
 
-        List<Integer> ineligibleReplicas = partitionData.newIsr().stream()
-            .filter(replica -> !isEligibleReplica.apply(replica))
-            .collect(Collectors.toList());
+        List<IneligibleReplica> ineligibleReplicas = ineligibleReplicasForIsr(newIsr);
         if (!ineligibleReplicas.isEmpty()) {
             log.info("Rejecting AlterPartition request from node {} for {}-{} because " +
                     "it specified ineligible replicas {} in the new ISR {}.",
@@ -1141,6 +1159,21 @@ public class ReplicationControlManager {
         }
 
         return Errors.NONE;
+    }
+
+    private List<IneligibleReplica> ineligibleReplicasForIsr(int[] replicas) {
+        List<IneligibleReplica> ineligibleReplicas = new ArrayList<>(0);
+        for (Integer replicaId : replicas) {
+            BrokerRegistration registration = clusterControl.registration(replicaId);
+            if (registration == null) {
+                ineligibleReplicas.add(new IneligibleReplica(replicaId, "not registered"));
+            } else if (registration.inControlledShutdown()) {
+                ineligibleReplicas.add(new IneligibleReplica(replicaId, "shutting down"));
+            } else if (registration.fenced()) {
+                ineligibleReplicas.add(new IneligibleReplica(replicaId, "fenced"));
+            }
+        }
+        return ineligibleReplicas;
     }
 
     /**
@@ -1162,7 +1195,7 @@ public class ReplicationControlManager {
         if (featureControl.metadataVersion().isBrokerRegistrationChangeRecordSupported()) {
             records.add(new ApiMessageAndVersion(new BrokerRegistrationChangeRecord().
                     setBrokerId(brokerId).setBrokerEpoch(brokerRegistration.epoch()).
-                    setFenced(BrokerRegistrationFencingChange.UNFENCE.value()),
+                    setFenced(BrokerRegistrationFencingChange.FENCE.value()),
                     (short) 0));
         } else {
             records.add(new ApiMessageAndVersion(new FenceBrokerRecord().
@@ -1205,7 +1238,7 @@ public class ReplicationControlManager {
         if (featureControl.metadataVersion().isBrokerRegistrationChangeRecordSupported()) {
             records.add(new ApiMessageAndVersion(new BrokerRegistrationChangeRecord().
                 setBrokerId(brokerId).setBrokerEpoch(brokerEpoch).
-                setFenced(BrokerRegistrationFencingChange.FENCE.value()),
+                setFenced(BrokerRegistrationFencingChange.UNFENCE.value()),
                 (short) 0));
         } else {
             records.add(new ApiMessageAndVersion(new UnfenceBrokerRecord().setId(brokerId).
@@ -1339,13 +1372,13 @@ public class ReplicationControlManager {
     }
 
     ControllerResult<BrokerHeartbeatReply> processBrokerHeartbeat(
-                BrokerHeartbeatRequestData request, long lastCommittedOffset) {
+                BrokerHeartbeatRequestData request, long registerBrokerRecordOffset) {
         int brokerId = request.brokerId();
         long brokerEpoch = request.brokerEpoch();
         clusterControl.checkBrokerEpoch(brokerId, brokerEpoch);
         BrokerHeartbeatManager heartbeatManager = clusterControl.heartbeatManager();
         BrokerControlStates states = heartbeatManager.calculateNextBrokerState(brokerId,
-            request, lastCommittedOffset, () -> brokersToIsrs.hasLeaderships(brokerId));
+            request, registerBrokerRecordOffset, () -> brokersToIsrs.hasLeaderships(brokerId));
         List<ApiMessageAndVersion> records = new ArrayList<>();
         if (states.current() != states.next()) {
             switch (states.next()) {
@@ -1366,7 +1399,7 @@ public class ReplicationControlManager {
         heartbeatManager.touch(brokerId,
             states.next().fenced(),
             request.currentMetadataOffset());
-        boolean isCaughtUp = request.currentMetadataOffset() >= lastCommittedOffset;
+        boolean isCaughtUp = request.currentMetadataOffset() >= registerBrokerRecordOffset;
         BrokerHeartbeatReply reply = new BrokerHeartbeatReply(isCaughtUp,
                 states.next().fenced(),
                 states.next().inControlledShutdown(),
@@ -1905,5 +1938,20 @@ public class ReplicationControlManager {
 
     ReplicationControlIterator iterator(long epoch) {
         return new ReplicationControlIterator(epoch);
+    }
+
+    private static final class IneligibleReplica {
+        private final int replicaId;
+        private final String reason;
+
+        private IneligibleReplica(int replicaId, String reason) {
+            this.replicaId = replicaId;
+            this.reason = reason;
+        }
+
+        @Override
+        public String toString() {
+            return replicaId + " (" + reason + ")";
+        }
     }
 }

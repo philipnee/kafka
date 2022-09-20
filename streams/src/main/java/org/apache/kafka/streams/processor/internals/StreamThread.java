@@ -35,6 +35,7 @@ import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.streams.KafkaClientSupplier;
 import org.apache.kafka.streams.StreamsConfig;
+import org.apache.kafka.streams.StreamsConfig.InternalConfig;
 import org.apache.kafka.streams.TaskMetadata;
 import org.apache.kafka.streams.ThreadMetadata;
 import org.apache.kafka.streams.errors.StreamsException;
@@ -318,8 +319,8 @@ public class StreamThread extends Thread {
     // These are used to signal from outside the stream thread, but the variables themselves are internal to the thread
     private final AtomicLong cacheResizeSize = new AtomicLong(-1L);
     private final AtomicBoolean leaveGroupRequested = new AtomicBoolean(false);
-    private final AtomicLong maxBufferSizeBytes = new AtomicLong(-1L);
     private final boolean eosEnabled;
+    private final boolean stateUpdaterEnabled;
 
     public static StreamThread create(final TopologyMetadata topologyMetadata,
                                       final StreamsConfig config,
@@ -331,7 +332,6 @@ public class StreamThread extends Thread {
                                       final Time time,
                                       final StreamsMetadataState streamsMetadataState,
                                       final long cacheSizeBytes,
-                                      final long maxBufferSizeBytes,
                                       final StateDirectory stateDirectory,
                                       final StateRestoreListener userStateRestoreListener,
                                       final int threadIdx,
@@ -364,6 +364,8 @@ public class StreamThread extends Thread {
 
         final ThreadCache cache = new ThreadCache(logContext, cacheSizeBytes, streamsMetrics);
 
+        final boolean stateUpdaterEnabled =
+            InternalConfig.getBoolean(config.originals(), InternalConfig.STATE_UPDATER_ENABLED, false);
         final ActiveTaskCreator activeTaskCreator = new ActiveTaskCreator(
             topologyMetadata,
             config,
@@ -375,8 +377,8 @@ public class StreamThread extends Thread {
             clientSupplier,
             threadId,
             processId,
-            log
-        );
+            log,
+            stateUpdaterEnabled);
         final StandbyTaskCreator standbyTaskCreator = new StandbyTaskCreator(
             topologyMetadata,
             config,
@@ -384,19 +386,21 @@ public class StreamThread extends Thread {
             stateDirectory,
             changelogReader,
             threadId,
-            log
-        );
+            log,
+            stateUpdaterEnabled);
+
         final TaskManager taskManager = new TaskManager(
             time,
             changelogReader,
             processId,
             logPrefix,
-            streamsMetrics,
             activeTaskCreator,
             standbyTaskCreator,
+            new Tasks(new LogContext(logPrefix)),
             topologyMetadata,
             adminClient,
-            stateDirectory
+            stateDirectory,
+            maybeCreateAndStartStateUpdater(stateUpdaterEnabled, config, changelogReader, time, clientId, threadIdx)
         );
         referenceContainer.taskManager = taskManager;
 
@@ -412,7 +416,6 @@ public class StreamThread extends Thread {
         }
 
         final Consumer<byte[], byte[]> mainConsumer = clientSupplier.getConsumer(consumerConfigs);
-        changelogReader.setMainConsumer(mainConsumer);
         taskManager.setMainConsumer(mainConsumer);
         referenceContainer.mainConsumer = mainConsumer;
 
@@ -434,11 +437,26 @@ public class StreamThread extends Thread {
             referenceContainer.nonFatalExceptionsToHandle,
             shutdownErrorHook,
             streamsUncaughtExceptionHandler,
-            cache::resize,
-            maxBufferSizeBytes
+            cache::resize
         );
 
         return streamThread.updateThreadMetadata(getSharedAdminClientId(clientId));
+    }
+
+    private static StateUpdater maybeCreateAndStartStateUpdater(final boolean stateUpdaterEnabled,
+                                                                final StreamsConfig streamsConfig,
+                                                                final ChangelogReader changelogReader,
+                                                                final Time time,
+                                                                final String clientId,
+                                                                final int threadIdx) {
+        if (stateUpdaterEnabled) {
+            final String name = clientId + "-StateUpdater-" + threadIdx;
+            final StateUpdater stateUpdater = new DefaultStateUpdater(name, streamsConfig, changelogReader, time);
+            stateUpdater.start();
+            return stateUpdater;
+        } else {
+            return null;
+        }
     }
 
     public StreamThread(final Time time,
@@ -458,8 +476,7 @@ public class StreamThread extends Thread {
                         final Queue<StreamsException> nonFatalExceptionsToHandle,
                         final Runnable shutdownErrorHook,
                         final BiConsumer<Throwable, Boolean> streamsUncaughtExceptionHandler,
-                        final java.util.function.Consumer<Long> cacheResizer,
-                        final long maxBufferSizeBytes) {
+                        final java.util.function.Consumer<Long> cacheResizer) {
         super(threadId);
         this.stateLock = new Object();
         this.adminClient = adminClient;
@@ -528,7 +545,7 @@ public class StreamThread extends Thread {
 
         this.numIterations = 1;
         this.eosEnabled = eosEnabled(config);
-        this.maxBufferSizeBytes.set(maxBufferSizeBytes);
+        this.stateUpdaterEnabled = InternalConfig.getBoolean(config.originals(), InternalConfig.STATE_UPDATER_ENABLED, false);
     }
 
     private static final class InternalConsumerConfig extends ConsumerConfig {
@@ -711,17 +728,8 @@ public class StreamThread extends Thread {
         }
     }
 
-    public void resizeCacheAndBufferMemory(final long cacheSize, final long maxBufferSize) {
-        cacheResizeSize.set(cacheSize);
-        maxBufferSizeBytes.set(maxBufferSize);
-    }
-
-    public long getCacheSize() {
-        return cacheResizeSize.get();
-    }
-
-    public long getMaxBufferSize() {
-        return maxBufferSizeBytes.get();
+    public void resizeCache(final long size) {
+        cacheResizeSize.set(size);
     }
 
     /**
@@ -768,7 +776,8 @@ public class StreamThread extends Thread {
         long totalCommitLatency = 0L;
         long totalProcessLatency = 0L;
         long totalPunctuateLatency = 0L;
-        if (state == State.RUNNING) {
+        if (state == State.RUNNING
+            || (stateUpdaterEnabled && isRunning())) {
             /*
              * Within an iteration, after processing up to N (N initialized as 1 upon start up) records for each applicable tasks, check the current time:
              *  1. If it is time to punctuate, do it;
@@ -796,10 +805,6 @@ public class StreamThread extends Thread {
 
                     totalProcessed += processed;
                     totalRecordsProcessedSinceLastSummary += processed;
-                    final long bufferSize = taskManager.getInputBufferSizeInBytes();
-                    if (bufferSize <= maxBufferSizeBytes.get()) {
-                        mainConsumer.resume(mainConsumer.paused());
-                    }
                 }
 
                 log.debug("Processed {} records with {} iterations; invoking punctuators if necessary",
@@ -869,37 +874,47 @@ public class StreamThread extends Thread {
     }
 
     private void initializeAndRestorePhase() {
-        // only try to initialize the assigned tasks
-        // if the state is still in PARTITION_ASSIGNED after the poll call
+        final java.util.function.Consumer<Set<TopicPartition>> offsetResetter = partitions -> resetOffsets(partitions, null);
         final State stateSnapshot = state;
-        if (stateSnapshot == State.PARTITIONS_ASSIGNED
-            || stateSnapshot == State.RUNNING && taskManager.needsInitializationOrRestoration()) {
+        if (stateUpdaterEnabled) {
+            checkStateUpdater();
+        } else {
+            // only try to initialize the assigned tasks
+            // if the state is still in PARTITION_ASSIGNED after the poll call
+            if (stateSnapshot == State.PARTITIONS_ASSIGNED
+                || stateSnapshot == State.RUNNING && taskManager.needsInitializationOrRestoration()) {
 
-            log.debug("State is {}; initializing tasks if necessary", stateSnapshot);
+                log.debug("State is {}; initializing tasks if necessary", stateSnapshot);
 
-            // transit to restore active is idempotent so we can call it multiple times
-            changelogReader.enforceRestoreActive();
+                if (taskManager.tryToCompleteRestoration(now, offsetResetter)) {
+                    log.info("Restoration took {} ms for all tasks {}", time.milliseconds() - lastPartitionAssignedMs,
+                        taskManager.allTasks().keySet());
+                    setState(State.RUNNING);
+                }
 
-            if (taskManager.tryToCompleteRestoration(now, partitions -> resetOffsets(partitions, null))) {
-                changelogReader.transitToUpdateStandby();
-                log.info("Restoration took {} ms for all tasks {}", time.milliseconds() - lastPartitionAssignedMs,
-                    taskManager.tasks().keySet());
-                setState(State.RUNNING);
+                if (log.isDebugEnabled()) {
+                    log.debug("Initialization call done. State is {}", state);
+                }
             }
 
             if (log.isDebugEnabled()) {
-                log.debug("Initialization call done. State is {}", state);
+                log.debug("Idempotently invoking restoration logic in state {}", state);
             }
+            // we can always let changelog reader try restoring in order to initialize the changelogs;
+            // if there's no active restoring or standby updating it would not try to fetch any data
+            // After KAFKA-13873, we only restore the not paused tasks.
+            changelogReader.restore(taskManager.notPausedTasks());
+            log.debug("Idempotent restore call done. Thread state has not changed.");
         }
+    }
 
-        if (log.isDebugEnabled()) {
-            log.debug("Idempotently invoking restoration logic in state {}", state);
+    private void checkStateUpdater() {
+        final java.util.function.Consumer<Set<TopicPartition>> offsetResetter = partitions -> resetOffsets(partitions, null);
+        final State stateSnapshot = state;
+        final boolean allRunning = taskManager.checkStateUpdater(now, offsetResetter);
+        if (allRunning && stateSnapshot == State.PARTITIONS_ASSIGNED) {
+            setState(State.RUNNING);
         }
-        // we can always let changelog reader try restoring in order to initialize the changelogs;
-        // if there's no active restoring or standby updating it would not try to fetch any data
-        // After KAFKA-13873, we only restore the not paused tasks.
-        changelogReader.restore(taskManager.notPausedTasks());
-        log.debug("Idempotent restore call done. Thread state has not changed.");
     }
 
     // Check if the topology has been updated since we last checked, ie via #addNamedTopology or #removeNamedTopology
@@ -918,8 +933,7 @@ public class StreamThread extends Thread {
         }
     }
 
-    // Visible for testing
-    long pollPhase() {
+    private long pollPhase() {
         final ConsumerRecords<byte[], byte[]> records;
         log.debug("Invoking poll on main Consumer");
 
@@ -965,17 +979,6 @@ public class StreamThread extends Thread {
         if (!records.isEmpty()) {
             pollRecordsSensor.record(numRecords, now);
             taskManager.addRecordsToTasks(records);
-            // Check buffer size after adding records to tasks
-            final long bufferSize = taskManager.getInputBufferSizeInBytes();
-            // Pausing partitions as the buffer size now exceeds max buffer size
-            if (bufferSize > maxBufferSizeBytes.get()) {
-                log.info("Buffered records size {} bytes exceeds {}. Pausing the consumer", bufferSize, maxBufferSizeBytes.get());
-                // Only non-empty partitions are paused here. Reason is that, if a task has multiple partitions with
-                // some of them empty, then in that case pausing even empty partitions would sacrifice ordered processing
-                // and even lead to temporal deadlock. More explanation can be found here:
-                // https://issues.apache.org/jira/browse/KAFKA-13152?focusedCommentId=17400647&page=com.atlassian.jira.plugin.system.issuetabpanels%3Acomment-tabpanel#comment-17400647
-                mainConsumer.pause(taskManager.nonEmptyPartitions());
-            }
         }
 
         while (!nonFatalExceptionsToHandle.isEmpty()) {
@@ -1095,7 +1098,7 @@ public class StreamThread extends Thread {
             }
 
             committed = taskManager.commit(
-                taskManager.tasks()
+                taskManager.allTasks()
                     .values()
                     .stream()
                     .filter(t -> t.state() == Task.State.RUNNING || t.state() == Task.State.RESTORING)
@@ -1155,7 +1158,7 @@ public class StreamThread extends Thread {
         // intentionally do not check the returned flag
         setState(State.PENDING_SHUTDOWN);
 
-        log.info("Shutting down");
+        log.info("Shutting down {}", cleanRun ? "clean" : "unclean");
 
         try {
             taskManager.shutdown(cleanRun);
@@ -1263,7 +1266,7 @@ public class StreamThread extends Thread {
     }
 
     public Map<TaskId, Task> allTasks() {
-        return taskManager.tasks();
+        return taskManager.allTasks();
     }
 
     /**

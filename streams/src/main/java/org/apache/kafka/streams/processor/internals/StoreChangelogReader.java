@@ -17,8 +17,9 @@
 package org.apache.kafka.streams.processor.internals;
 
 import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsOptions;
+import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsSpec;
 import org.apache.kafka.clients.admin.ListOffsetsOptions;
-import org.apache.kafka.clients.admin.ListOffsetsResult;
 import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -27,6 +28,7 @@ import org.apache.kafka.clients.consumer.InvalidOffsetException;
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
@@ -52,8 +54,6 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-
-import static org.apache.kafka.streams.processor.internals.ClientUtils.fetchCommittedOffsets;
 
 /**
  * ChangelogReader is created and maintained by the stream thread and used for both updating standby tasks and
@@ -205,18 +205,13 @@ public class StoreChangelogReader implements ChangelogReader {
     // is being removed from the thread; otherwise it would stay in this map even after completed
     private final Map<TopicPartition, ChangelogMetadata> changelogs;
 
-    // the changelog reader only need the main consumer to get committed offsets for source changelog partitions
-    // to update offset limit for standby tasks;
-    private Consumer<byte[], byte[]> mainConsumer;
+    // groupId is needed for the admin client to retrieve committed offsets
+    private final String groupId;
 
-    // the changelog reader needs the admin client to list end offsets
+    // the changelog reader needs the admin client to list end offsets and committed offsets
     private final Admin adminClient;
 
     private long lastUpdateOffsetTime;
-
-    void setMainConsumer(final Consumer<byte[], byte[]> consumer) {
-        this.mainConsumer = consumer;
-    }
 
     public StoreChangelogReader(final Time time,
                                 final StreamsConfig config,
@@ -231,6 +226,7 @@ public class StoreChangelogReader implements ChangelogReader {
         this.restoreConsumer = restoreConsumer;
         this.stateRestoreListener = stateRestoreListener;
 
+        this.groupId = config.getString(StreamsConfig.APPLICATION_ID_CONFIG);
         this.pollTime = Duration.ofMillis(config.getLong(StreamsConfig.POLL_MS_CONFIG));
         this.updateOffsetIntervalMs = config.getLong(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG) == Long.MAX_VALUE ?
             DEFAULT_OFFSET_UPDATE_MS : config.getLong(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG);
@@ -352,6 +348,13 @@ public class StoreChangelogReader implements ChangelogReader {
         }
     }
 
+    @Override
+    public void register(final Set<TopicPartition> changelogPartitions, final ProcessorStateManager stateManager) {
+        for (final TopicPartition changelogPartition : changelogPartitions) {
+            register(changelogPartition, stateManager);
+        }
+    }
+
     private ChangelogMetadata restoringChangelogByPartition(final TopicPartition partition) {
         final ChangelogMetadata changelogMetadata = changelogs.get(partition);
         if (changelogMetadata == null) {
@@ -449,6 +452,8 @@ public class StoreChangelogReader implements ChangelogReader {
                 final Set<TaskId> corruptedTasks = new HashSet<>();
                 e.partitions().forEach(partition -> corruptedTasks.add(changelogs.get(partition).stateManager.taskId()));
                 throw new TaskCorruptedException(corruptedTasks, e);
+            } catch (final InterruptException interruptException) {
+                throw interruptException;
             } catch (final KafkaException e) {
                 throw new StreamsException("Restore consumer get unexpected error polling records.", e);
             }
@@ -486,7 +491,7 @@ public class StoreChangelogReader implements ChangelogReader {
     }
 
     private void pauseResumePartitions(final Map<TaskId, Task> tasks,
-        final Set<TopicPartition> restoringChangelogs) {
+                                       final Set<TopicPartition> restoringChangelogs) {
         if (state == ChangelogReaderState.ACTIVE_RESTORING) {
             updatePartitionsByType(tasks, restoringChangelogs, TaskType.ACTIVE);
         }
@@ -582,6 +587,7 @@ public class StoreChangelogReader implements ChangelogReader {
             for (final TopicPartition partition : changelogsWithLimitOffsets) {
                 if (!changelogs.get(partition).bufferedRecords().isEmpty()) {
                     updateLimitOffsetsForStandbyChangelogs(committedOffsetForChangelogs(tasks, changelogsWithLimitOffsets));
+                    lastUpdateOffsetTime = time.milliseconds();
                     break;
                 }
             }
@@ -693,41 +699,54 @@ public class StoreChangelogReader implements ChangelogReader {
         tasks.forEach(t -> t.maybeInitTaskTimeoutOrThrow(now, cause));
     }
 
-    private Map<TopicPartition, Long> committedOffsetForChangelogs(final Map<TaskId, Task> tasks,
-                                                                   final Set<TopicPartition> partitions) {
-        final Map<TopicPartition, Long> committedOffsets;
-        try {
-            committedOffsets = fetchCommittedOffsets(partitions, mainConsumer);
-            clearTaskTimeout(getTasksFromPartitions(tasks, partitions));
-        } catch (final TimeoutException timeoutException) {
-            log.debug("Could not fetch all committed offsets for {}, will retry in the next run loop", partitions);
-            maybeInitTaskTimeoutOrThrow(getTasksFromPartitions(tasks, partitions), timeoutException);
-            return Collections.emptyMap();
-        }
-        lastUpdateOffsetTime = time.milliseconds();
-        return committedOffsets;
-    }
-
-    private Map<TopicPartition, Long> endOffsetForChangelogs(final Map<TaskId, Task> tasks,
-                                                             final Set<TopicPartition> partitions) {
+    private Map<TopicPartition, Long> committedOffsetForChangelogs(final Map<TaskId, Task> tasks, final Set<TopicPartition> partitions) {
         if (partitions.isEmpty()) {
             return Collections.emptyMap();
         }
 
         try {
-            final ListOffsetsResult result = adminClient.listOffsets(
-                    partitions.stream().collect(Collectors.toMap(Function.identity(), tp -> OffsetSpec.latest())),
-                    new ListOffsetsOptions(IsolationLevel.READ_UNCOMMITTED)
-            );
+            // those which do not have a committed offset would default to 0
+            final ListConsumerGroupOffsetsOptions options = new ListConsumerGroupOffsetsOptions()
+                    .requireStable(true);
+            final ListConsumerGroupOffsetsSpec spec = new ListConsumerGroupOffsetsSpec()
+                    .topicPartitions(new ArrayList<>(partitions));
+            final Map<TopicPartition, Long> committedOffsets = adminClient.listConsumerGroupOffsets(Collections.singletonMap(groupId, spec))
+                    .partitionsToOffsetAndMetadata(groupId).get().entrySet()
+                    .stream()
+                    .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue() == null ? 0L : e.getValue().offset()));
 
-            final Map<TopicPartition,  ListOffsetsResult.ListOffsetsResultInfo> resultPerPartition = result.all().get();
             clearTaskTimeout(getTasksFromPartitions(tasks, partitions));
-
-            return resultPerPartition.entrySet().stream().collect(
-                    Collectors.toMap(Map.Entry::getKey, entry -> entry.getValue().offset())
-            );
+            return committedOffsets;
         } catch (final TimeoutException | InterruptedException | ExecutionException retriableException) {
-            log.debug("Could not fetch all end offsets for {}, will retry in the next run loop", partitions);
+            log.debug("Could not retrieve the committed offsets for partitions {} due to {}, will retry in the next run loop",
+                partitions, retriableException.toString());
+            maybeInitTaskTimeoutOrThrow(getTasksFromPartitions(tasks, partitions), retriableException);
+            return Collections.emptyMap();
+        } catch (final KafkaException e) {
+            throw new StreamsException(String.format("Failed to retrieve committed offsets for %s", partitions), e);
+        }
+    }
+
+    private Map<TopicPartition, Long> endOffsetForChangelogs(final Map<TaskId, Task> tasks, final Set<TopicPartition> partitions) {
+        if (partitions.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        try {
+            // we always use read_uncommitted to get log end offset since the last committed txn may have not advanced the LSO for EOS,
+            // see KAFKA-10167 for more details
+            final ListOffsetsOptions options = new ListOffsetsOptions(IsolationLevel.READ_UNCOMMITTED);
+            final Map<TopicPartition, OffsetSpec> offsetSpecs =
+                partitions.stream().collect(Collectors.toMap(Function.identity(), tp -> OffsetSpec.latest()));
+            final Map<TopicPartition, Long> logEndOffsets = adminClient.listOffsets(offsetSpecs, options)
+                .all().get().entrySet()
+                .stream().collect(Collectors.toMap(Map.Entry::getKey, entry -> entry.getValue().offset()));
+
+            clearTaskTimeout(getTasksFromPartitions(tasks, partitions));
+            return logEndOffsets;
+        } catch (final TimeoutException | InterruptedException | ExecutionException retriableException) {
+            log.debug("Could not fetch all end offsets for {} due to {}, will retry in the next run loop",
+                partitions, retriableException.toString());
             maybeInitTaskTimeoutOrThrow(getTasksFromPartitions(tasks, partitions), retriableException);
             return Collections.emptyMap();
         } catch (final KafkaException e) {

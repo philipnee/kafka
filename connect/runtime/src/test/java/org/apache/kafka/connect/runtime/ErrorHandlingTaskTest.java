@@ -77,6 +77,7 @@ import org.powermock.modules.junit4.PowerMockRunnerDelegate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collection;
@@ -230,7 +231,6 @@ public class ErrorHandlingTaskTest {
         ErrorReporter reporter = EasyMock.mock(ErrorReporter.class);
 
         RetryWithToleranceOperator retryWithToleranceOperator = operator();
-        retryWithToleranceOperator.metrics(errorHandlingMetrics);
         retryWithToleranceOperator.reporters(singletonList(reporter));
 
         createSinkTask(initialState, retryWithToleranceOperator);
@@ -242,6 +242,9 @@ public class ErrorHandlingTaskTest {
         EasyMock.expectLastCall();
 
         consumer.close();
+        EasyMock.expectLastCall();
+
+        headerConverter.close();
         EasyMock.expectLastCall();
 
         PowerMock.replayAll();
@@ -258,7 +261,6 @@ public class ErrorHandlingTaskTest {
         ErrorReporter reporter = EasyMock.mock(ErrorReporter.class);
 
         RetryWithToleranceOperator retryWithToleranceOperator = operator();
-        retryWithToleranceOperator.metrics(errorHandlingMetrics);
         retryWithToleranceOperator.reporters(singletonList(reporter));
 
         createSourceTask(initialState, retryWithToleranceOperator);
@@ -282,7 +284,6 @@ public class ErrorHandlingTaskTest {
         ErrorReporter reporterB = EasyMock.mock(ErrorReporter.class);
 
         RetryWithToleranceOperator retryWithToleranceOperator = operator();
-        retryWithToleranceOperator.metrics(errorHandlingMetrics);
         retryWithToleranceOperator.reporters(Arrays.asList(reporterA, reporterB));
 
         createSourceTask(initialState, retryWithToleranceOperator);
@@ -312,7 +313,6 @@ public class ErrorHandlingTaskTest {
         LogReporter reporter = new LogReporter(taskId, connConfig(reportProps), errorHandlingMetrics);
 
         RetryWithToleranceOperator retryWithToleranceOperator = operator();
-        retryWithToleranceOperator.metrics(errorHandlingMetrics);
         retryWithToleranceOperator.reporters(singletonList(reporter));
         createSinkTask(initialState, retryWithToleranceOperator);
 
@@ -353,7 +353,7 @@ public class ErrorHandlingTaskTest {
     }
 
     private RetryWithToleranceOperator operator() {
-        return new RetryWithToleranceOperator(OPERATOR_RETRY_TIMEOUT_MILLIS, OPERATOR_RETRY_MAX_DELAY_MILLIS, OPERATOR_TOLERANCE_TYPE, SYSTEM);
+        return new RetryWithToleranceOperator(OPERATOR_RETRY_TIMEOUT_MILLIS, OPERATOR_RETRY_MAX_DELAY_MILLIS, OPERATOR_TOLERANCE_TYPE, SYSTEM, errorHandlingMetrics);
     }
 
     @Test
@@ -364,7 +364,6 @@ public class ErrorHandlingTaskTest {
         LogReporter reporter = new LogReporter(taskId, connConfig(reportProps), errorHandlingMetrics);
 
         RetryWithToleranceOperator retryWithToleranceOperator = operator();
-        retryWithToleranceOperator.metrics(errorHandlingMetrics);
         retryWithToleranceOperator.reporters(singletonList(reporter));
         createSourceTask(initialState, retryWithToleranceOperator);
 
@@ -381,9 +380,10 @@ public class ErrorHandlingTaskTest {
 
         EasyMock.expect(workerSourceTask.commitOffsets()).andReturn(true);
 
+        offsetStore.start();
+        EasyMock.expectLastCall();
         sourceTask.initialize(EasyMock.anyObject());
         EasyMock.expectLastCall();
-
         sourceTask.start(EasyMock.anyObject());
         EasyMock.expectLastCall();
 
@@ -428,7 +428,6 @@ public class ErrorHandlingTaskTest {
         LogReporter reporter = new LogReporter(taskId, connConfig(reportProps), errorHandlingMetrics);
 
         RetryWithToleranceOperator retryWithToleranceOperator = operator();
-        retryWithToleranceOperator.metrics(errorHandlingMetrics);
         retryWithToleranceOperator.reporters(singletonList(reporter));
         createSourceTask(initialState, retryWithToleranceOperator, badConverter());
 
@@ -445,9 +444,10 @@ public class ErrorHandlingTaskTest {
 
         EasyMock.expect(workerSourceTask.commitOffsets()).andReturn(true);
 
+        offsetStore.start();
+        EasyMock.expectLastCall();
         sourceTask.initialize(EasyMock.anyObject());
         EasyMock.expectLastCall();
-
         sourceTask.start(EasyMock.anyObject());
         EasyMock.expectLastCall();
 
@@ -538,6 +538,13 @@ public class ErrorHandlingTaskTest {
         EasyMock.expectLastCall();
 
         offsetStore.stop();
+        EasyMock.expectLastCall();
+
+        try {
+            headerConverter.close();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
         EasyMock.expectLastCall();
     }
 

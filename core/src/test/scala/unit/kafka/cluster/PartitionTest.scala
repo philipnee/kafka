@@ -26,12 +26,12 @@ import kafka.server.epoch.EpochEntry
 import kafka.utils._
 import kafka.zk.KafkaZkClient
 import org.apache.kafka.common.errors.{ApiException, FencedLeaderEpochException, InconsistentTopicIdException, NotLeaderOrFollowerException, OffsetNotAvailableException, OffsetOutOfRangeException, UnknownLeaderEpochException}
-import org.apache.kafka.common.message.FetchResponseData
+import org.apache.kafka.common.message.{AlterPartitionResponseData, FetchResponseData}
 import org.apache.kafka.common.message.LeaderAndIsrRequestData.LeaderAndIsrPartitionState
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
 import org.apache.kafka.common.record.FileRecords.TimestampAndOffset
 import org.apache.kafka.common.record._
-import org.apache.kafka.common.requests.{FetchRequest, ListOffsetsRequest}
+import org.apache.kafka.common.requests.{AlterPartitionResponse, FetchRequest, ListOffsetsRequest, RequestHeader}
 import org.apache.kafka.common.utils.SystemTime
 import org.apache.kafka.common.{IsolationLevel, TopicPartition, Uuid}
 import org.apache.kafka.metadata.LeaderRecoveryState
@@ -46,7 +46,8 @@ import java.nio.ByteBuffer
 import java.util.Optional
 import java.util.concurrent.{CountDownLatch, Semaphore}
 import kafka.server.epoch.LeaderEpochFileCache
-import kafka.server.metadata.KRaftMetadataCache
+import kafka.server.metadata.{KRaftMetadataCache, ZkMetadataCache}
+import org.apache.kafka.clients.ClientResponse
 import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.replica.ClientMetadata
 import org.apache.kafka.common.replica.ClientMetadata.DefaultClientMetadata
@@ -54,6 +55,8 @@ import org.apache.kafka.common.security.auth.{KafkaPrincipal, SecurityProtocol}
 import org.apache.kafka.server.common.MetadataVersion
 import org.apache.kafka.server.common.MetadataVersion.IBP_2_6_IV0
 import org.apache.kafka.server.metrics.KafkaYammerMetrics
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 
 import scala.compat.java8.OptionConverters._
 import scala.jdk.CollectionConverters._
@@ -235,6 +238,47 @@ class PartitionTest extends AbstractPartitionTest {
     thread1.join()
     thread2.join()
     assertEquals(None, partition.futureLog)
+  }
+
+  @Test
+  def testReplicaFetchToFollower(): Unit = {
+    val controllerEpoch = 3
+    val followerId = brokerId + 1
+    val leaderId = brokerId + 2
+    val replicas = List[Integer](brokerId, followerId, leaderId).asJava
+    val isr = List[Integer](brokerId, followerId, leaderId).asJava
+    val leaderEpoch = 8
+    val partitionEpoch = 1
+
+    assertTrue(partition.makeFollower(new LeaderAndIsrPartitionState()
+      .setControllerEpoch(controllerEpoch)
+      .setLeader(leaderId)
+      .setLeaderEpoch(leaderEpoch)
+      .setIsr(isr)
+      .setPartitionEpoch(partitionEpoch)
+      .setReplicas(replicas)
+      .setIsNew(true),
+      offsetCheckpoints, None
+    ))
+
+    def assertFetchFromReplicaFails[T <: ApiException](
+      expectedExceptionClass: Class[T],
+      leaderEpoch: Option[Int]
+    ): Unit = {
+      assertThrows(expectedExceptionClass, () => {
+        fetchFollower(
+          partition,
+          replicaId = followerId,
+          fetchOffset = 0L,
+          leaderEpoch = leaderEpoch
+        )
+      })
+    }
+
+    assertFetchFromReplicaFails(classOf[NotLeaderOrFollowerException], None)
+    assertFetchFromReplicaFails(classOf[NotLeaderOrFollowerException], Some(leaderEpoch))
+    assertFetchFromReplicaFails(classOf[UnknownLeaderEpochException], Some(leaderEpoch + 1))
+    assertFetchFromReplicaFails(classOf[FencedLeaderEpochException], Some(leaderEpoch - 1))
   }
 
   @Test
@@ -1333,8 +1377,11 @@ class PartitionTest extends AbstractPartitionTest {
     assertEquals(alterPartitionListener.failures.get, 1)
   }
 
-  @Test
-  def testIsrNotExpandedIfReplicaIsFenced(): Unit = {
+  @ParameterizedTest
+  @ValueSource(strings = Array("zk", "kraft"))
+  def testIsrNotExpandedIfReplicaIsFencedOrShutdown(quorum: String): Unit = {
+    val kraft = quorum == "kraft"
+
     val log = logManager.getOrCreateLog(topicPartition, topicId = None)
     seedLogData(log, numRecords = 10, leaderEpoch = 4)
 
@@ -1344,7 +1391,19 @@ class PartitionTest extends AbstractPartitionTest {
     val replicas = List(brokerId, remoteBrokerId)
     val isr = Set(brokerId)
 
-    val metadataCache = mock(classOf[KRaftMetadataCache])
+    val metadataCache: MetadataCache = if (kraft) mock(classOf[KRaftMetadataCache]) else mock(classOf[ZkMetadataCache])
+
+    // Mark the remote broker as eligible or ineligible in the metadata cache of the leader.
+    // When using kraft, we can make the broker ineligible by fencing it.
+    // In ZK mode, we must mark the broker as alive for it to be eligible.
+    def markRemoteReplicaEligible(eligible: Boolean): Unit = {
+      if (kraft) {
+        when(metadataCache.asInstanceOf[KRaftMetadataCache].isBrokerFenced(remoteBrokerId)).thenReturn(!eligible)
+      } else {
+        when(metadataCache.hasAliveBroker(remoteBrokerId)).thenReturn(eligible)
+      }
+    }
+
     val partition = new Partition(
       topicPartition,
       replicaLagTimeMaxMs = Defaults.ReplicaLagTimeMaxMs,
@@ -1372,6 +1431,8 @@ class PartitionTest extends AbstractPartitionTest {
     assertEquals(isr, partition.partitionState.isr)
     assertEquals(isr, partition.partitionState.maximalIsr)
 
+    markRemoteReplicaEligible(true)
+
     // Fetch to let the follower catch up to the log end offset and
     // to check if an expansion is possible.
     fetchFollower(partition, replicaId = remoteBrokerId, fetchOffset = log.logEndOffset)
@@ -1388,7 +1449,7 @@ class PartitionTest extends AbstractPartitionTest {
     assertEquals(replicas.toSet, partition.partitionState.maximalIsr)
     assertEquals(1, alterPartitionManager.isrUpdates.size)
 
-    // Controller rejects the expansion because the broker is fenced.
+    // Controller rejects the expansion because the broker is fenced or offline.
     alterPartitionManager.failIsrUpdate(Errors.INELIGIBLE_REPLICA)
 
     // The leader reverts back to the previous ISR.
@@ -1397,8 +1458,8 @@ class PartitionTest extends AbstractPartitionTest {
     assertFalse(partition.partitionState.isInflight)
     assertEquals(0, alterPartitionManager.isrUpdates.size)
 
-    // The leader eventually learns about the fenced broker.
-    when(metadataCache.isBrokerFenced(remoteBrokerId)).thenReturn(true)
+    // The leader eventually learns about the fenced or offline broker.
+    markRemoteReplicaEligible(false)
 
     // The follower fetches again.
     fetchFollower(partition, replicaId = remoteBrokerId, fetchOffset = log.logEndOffset)
@@ -1409,8 +1470,8 @@ class PartitionTest extends AbstractPartitionTest {
     assertFalse(partition.partitionState.isInflight)
     assertEquals(0, alterPartitionManager.isrUpdates.size)
 
-    // The broker is eventually unfenced.
-    when(metadataCache.isBrokerFenced(remoteBrokerId)).thenReturn(false)
+    // The broker is eventually unfenced or brought back online.
+    markRemoteReplicaEligible(true)
 
     // The follower fetches again.
     fetchFollower(partition, replicaId = remoteBrokerId, fetchOffset = log.logEndOffset)
@@ -1934,6 +1995,108 @@ class PartitionTest extends AbstractPartitionTest {
     // Failure
     alterPartitionManager.failIsrUpdate(error)
     callback(brokerId, remoteBrokerId, partition)
+  }
+
+  private def createClientResponseWithAlterPartitionResponse(
+    topicPartition: TopicPartition,
+    partitionErrorCode: Short,
+    isr: List[Int] = List.empty,
+    leaderEpoch: Int = 0,
+    partitionEpoch: Int = 0
+  ): ClientResponse = {
+    val alterPartitionResponseData = new AlterPartitionResponseData()
+    val topicResponse = new AlterPartitionResponseData.TopicData()
+      .setTopicName(topicPartition.topic)
+
+    topicResponse.partitions.add(new AlterPartitionResponseData.PartitionData()
+      .setPartitionIndex(topicPartition.partition)
+      .setIsr(isr.map(Integer.valueOf).asJava)
+      .setLeaderEpoch(leaderEpoch)
+      .setPartitionEpoch(partitionEpoch)
+      .setErrorCode(partitionErrorCode))
+    alterPartitionResponseData.topics.add(topicResponse)
+
+    val alterPartitionResponse = new AlterPartitionResponse(alterPartitionResponseData)
+
+    new ClientResponse(new RequestHeader(ApiKeys.ALTER_PARTITION, 0, "client", 1),
+      null, null, 0, 0, false, null, null, alterPartitionResponse)
+  }
+
+  @Test
+  def testPartitionShouldRetryAlterPartitionRequest(): Unit = {
+    val mockChannelManager = mock(classOf[BrokerToControllerChannelManager])
+    val alterPartitionManager = new DefaultAlterPartitionManager(
+      controllerChannelManager = mockChannelManager,
+      scheduler = mock(classOf[KafkaScheduler]),
+      time = time,
+      brokerId = brokerId,
+      brokerEpochSupplier = () => 0,
+      metadataVersionSupplier = () => MetadataVersion.IBP_3_0_IV0
+    )
+
+    partition = new Partition(topicPartition,
+      replicaLagTimeMaxMs = Defaults.ReplicaLagTimeMaxMs,
+      interBrokerProtocolVersion = interBrokerProtocolVersion,
+      localBrokerId = brokerId,
+      time,
+      alterPartitionListener,
+      delayedOperations,
+      metadataCache,
+      logManager,
+      alterPartitionManager)
+
+    val log = logManager.getOrCreateLog(topicPartition, topicId = None)
+    seedLogData(log, numRecords = 10, leaderEpoch = 4)
+
+    val controllerEpoch = 0
+    val leaderEpoch = 5
+    val follower1 = brokerId + 1
+    val follower2 = brokerId + 2
+    val follower3 = brokerId + 3
+    val replicas = Seq(brokerId, follower1, follower2, follower3)
+    val isr = Seq(brokerId, follower1, follower2)
+    val partitionEpoch = 1
+
+    doNothing().when(delayedOperations).checkAndCompleteAll()
+
+    // Fail the first alter partition request with a retryable error to trigger a retry from the partition callback
+    val alterPartitionResponseWithUnknownServerError =
+      createClientResponseWithAlterPartitionResponse(topicPartition, Errors.UNKNOWN_SERVER_ERROR.code)
+
+    // Complete the ISR expansion
+    val alterPartitionResponseWithoutError =
+      createClientResponseWithAlterPartitionResponse(topicPartition, Errors.NONE.code, List(brokerId, follower1, follower2, follower3), leaderEpoch, partitionEpoch + 1)
+
+    when(mockChannelManager.sendRequest(any(), any()))
+      .thenAnswer { invocation =>
+        val controllerRequestCompletionHandler = invocation.getArguments()(1).asInstanceOf[ControllerRequestCompletionHandler]
+        controllerRequestCompletionHandler.onComplete(alterPartitionResponseWithUnknownServerError)
+      }
+      .thenAnswer { invocation =>
+        val controllerRequestCompletionHandler = invocation.getArguments()(1).asInstanceOf[ControllerRequestCompletionHandler]
+        controllerRequestCompletionHandler.onComplete(alterPartitionResponseWithoutError)
+      }
+
+    assertTrue(makeLeader(
+      topicId = None,
+      controllerEpoch,
+      leaderEpoch,
+      isr,
+      replicas,
+      partitionEpoch,
+      isNew = true
+    ))
+    assertEquals(0L, partition.localLogOrException.highWatermark)
+
+    // Expand ISR
+    fetchFollower(partition, replicaId = follower3, fetchOffset = 10L)
+
+    assertEquals(Set(brokerId, follower1, follower2, follower3), partition.partitionState.isr)
+    assertEquals(partitionEpoch + 1, partition.getPartitionEpoch)
+    // Verify that the AlterPartition request was sent twice
+    verify(mockChannelManager, times(2)).sendRequest(any(), any())
+    // After the retry, the partition state should be committed
+    assertFalse(partition.partitionState.isInflight)
   }
 
   @Test

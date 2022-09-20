@@ -30,8 +30,10 @@ import scala.collection.{Seq, mutable}
 import scala.jdk.CollectionConverters._
 import java.util.Properties
 import kafka.utils.TestUtils.{createAdminClient, resource}
+import org.apache.kafka.common.acl.AccessControlEntry
 import org.apache.kafka.common.{KafkaException, Uuid}
 import org.apache.kafka.common.network.ListenerName
+import org.apache.kafka.common.resource.ResourcePattern
 import org.apache.kafka.common.security.scram.ScramCredential
 import org.apache.kafka.common.utils.Time
 import org.apache.kafka.controller.ControllerRequestContextUtil.ANONYMOUS_CONTEXT
@@ -40,7 +42,7 @@ import org.apache.kafka.controller.ControllerRequestContextUtil.ANONYMOUS_CONTEX
  * A test harness that brings up some number of broker nodes
  */
 abstract class KafkaServerTestHarness extends QuorumTestHarness {
-  var instanceConfigs: Seq[KafkaConfig] = null
+  var instanceConfigs: Seq[KafkaConfig] = _
 
   private val _brokers = new mutable.ArrayBuffer[KafkaBroker]
 
@@ -58,7 +60,7 @@ abstract class KafkaServerTestHarness extends QuorumTestHarness {
     _brokers.asInstanceOf[mutable.Buffer[KafkaServer]]
   }
 
-  var alive: Array[Boolean] = null
+  var alive: Array[Boolean] = _
 
   /**
    * Implementations must override this method to return a set of KafkaConfigs. This method will be invoked for every
@@ -230,11 +232,19 @@ abstract class KafkaServerTestHarness extends QuorumTestHarness {
         TestUtils.deleteTopicWithAdmin(
           admin = admin,
           topic = topic,
-          brokers = brokers)
+          brokers = aliveBrokers)
       }
     } else {
       adminZkClient.deleteTopic(topic)
     }
+  }
+
+  def addAndVerifyAcls(acls: Set[AccessControlEntry], resource: ResourcePattern): Unit = {
+    TestUtils.addAndVerifyAcls(brokers, acls, resource, controllerServers)
+  }
+
+  def removeAndVerifyAcls(acls: Set[AccessControlEntry], resource: ResourcePattern): Unit = {
+    TestUtils.removeAndVerifyAcls(brokers, acls, resource, controllerServers)
   }
 
   /**

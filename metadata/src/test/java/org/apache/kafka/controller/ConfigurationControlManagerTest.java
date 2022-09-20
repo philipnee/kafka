@@ -281,18 +281,30 @@ public class ConfigurationControlManagerTest {
     public void testIncrementalAlterConfigsWithPolicy() {
         MockAlterConfigsPolicy policy = new MockAlterConfigsPolicy(asList(
             new RequestMetadata(MYTOPIC, Collections.emptyMap()),
-            new RequestMetadata(BROKER0, toMap(entry("foo.bar", "123"),
-                entry("quux", "456")))));
+            new RequestMetadata(BROKER0, toMap(
+                entry("foo.bar", "123"),
+                entry("quux", "456"),
+                entry("broker.config.to.remove", null)))));
         ConfigurationControlManager manager = new ConfigurationControlManager.Builder().
             setKafkaConfigSchema(SCHEMA).
             setAlterConfigPolicy(Optional.of(policy)).
             build();
+        // Existing configs should not be passed to the policy
+        manager.replay(new ConfigRecord().setResourceType(BROKER.id()).setResourceName("0").
+                setName("broker.config").setValue("123"));
+        manager.replay(new ConfigRecord().setResourceType(TOPIC.id()).setResourceName(MYTOPIC.name()).
+                setName("topic.config").setValue("123"));
+        manager.replay(new ConfigRecord().setResourceType(BROKER.id()).setResourceName("0").
+                setName("broker.config.to.remove").setValue("123"));
         assertEquals(ControllerResult.atomicOf(asList(new ApiMessageAndVersion(
                 new ConfigRecord().setResourceType(BROKER.id()).setResourceName("0").
                     setName("foo.bar").setValue("123"), CONFIG_RECORD.highestSupportedVersion()), new ApiMessageAndVersion(
                 new ConfigRecord().setResourceType(BROKER.id()).setResourceName("0").
-                    setName("quux").setValue("456"), CONFIG_RECORD.highestSupportedVersion())),
-            toMap(entry(MYTOPIC, new ApiError(Errors.POLICY_VIOLATION,
+                    setName("quux").setValue("456"), CONFIG_RECORD.highestSupportedVersion()), new ApiMessageAndVersion(
+                new ConfigRecord().setResourceType(BROKER.id()).setResourceName("0").
+                    setName("broker.config.to.remove").setValue(null), CONFIG_RECORD.highestSupportedVersion())
+                ),
+                toMap(entry(MYTOPIC, new ApiError(Errors.POLICY_VIOLATION,
                     "Expected: AlterConfigPolicy.RequestMetadata(resource=ConfigResource(" +
                     "type=TOPIC, name='mytopic'), configs={}). Got: " +
                     "AlterConfigPolicy.RequestMetadata(resource=ConfigResource(" +
@@ -301,15 +313,39 @@ public class ConfigurationControlManagerTest {
             manager.incrementalAlterConfigs(toMap(entry(MYTOPIC, toMap(
                 entry("foo.bar", entry(SET, "123")))),
                 entry(BROKER0, toMap(
-                entry("foo.bar", entry(SET, "123")),
-                entry("quux", entry(SET, "456"))))),
+                        entry("foo.bar", entry(SET, "123")),
+                        entry("quux", entry(SET, "456")),
+                        entry("broker.config.to.remove", entry(DELETE, null))
+                ))),
                 true));
+    }
+
+    private static class CheckForNullValuesPolicy implements AlterConfigPolicy {
+        @Override
+        public void validate(RequestMetadata actual) throws PolicyViolationException {
+            actual.configs().forEach((key, value) -> {
+                if (value == null) {
+                    throw new PolicyViolationException("Legacy Alter Configs should not see null values");
+                }
+            });
+        }
+
+        @Override
+        public void close() throws Exception {
+            // empty
+        }
+
+        @Override
+        public void configure(Map<String, ?> configs) {
+            // empty
+        }
     }
 
     @Test
     public void testLegacyAlterConfigs() {
         ConfigurationControlManager manager = new ConfigurationControlManager.Builder().
             setKafkaConfigSchema(SCHEMA).
+            setAlterConfigPolicy(Optional.of(new CheckForNullValuesPolicy())).
             build();
         List<ApiMessageAndVersion> expectedRecords1 = asList(
             new ApiMessageAndVersion(new ConfigRecord().

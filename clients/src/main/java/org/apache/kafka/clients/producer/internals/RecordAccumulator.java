@@ -214,6 +214,43 @@ public class RecordAccumulator {
     }
 
     /**
+     * Check if partition concurrently changed, or we need to complete previously disabled partition change.
+     *
+     * @param topic The topic
+     * @param topicInfo The topic info
+     * @param partitionInfo The built-in partitioner's partition info
+     * @param deque The partition queue
+     * @param nowMs The current time, in milliseconds
+     * @param cluster THe cluster metadata
+     * @return 'true' if partition changed and we need to get new partition info and retry,
+     *         'false' otherwise
+     */
+    private boolean partitionChanged(String topic,
+                                     TopicInfo topicInfo,
+                                     BuiltInPartitioner.StickyPartitionInfo partitionInfo,
+                                     Deque<ProducerBatch> deque, long nowMs,
+                                     Cluster cluster) {
+        if (topicInfo.builtInPartitioner.isPartitionChanged(partitionInfo)) {
+            log.trace("Partition {} for topic {} switched by a concurrent append, retrying",
+                    partitionInfo.partition(), topic);
+            return true;
+        }
+
+        // We might have disabled partition switch if the queue had incomplete batches.
+        // Check if all batches are full now and switch .
+        if (allBatchesFull(deque)) {
+            topicInfo.builtInPartitioner.updatePartitionInfo(partitionInfo, 0, cluster, true);
+            if (topicInfo.builtInPartitioner.isPartitionChanged(partitionInfo)) {
+                log.trace("Completed previously disabled switch for topic {} partition {}, retrying",
+                        topic, partitionInfo.partition());
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Add a record to the accumulator, return the append result
      * <p>
      * The append result will contain the future metadata, and flag for whether the appended batch is full or a new batch is created
@@ -275,14 +312,14 @@ public class RecordAccumulator {
                 Deque<ProducerBatch> dq = topicInfo.batches.computeIfAbsent(effectivePartition, k -> new ArrayDeque<>());
                 synchronized (dq) {
                     // After taking the lock, validate that the partition hasn't changed and retry.
-                    if (topicInfo.builtInPartitioner.isPartitionChanged(partitionInfo)) {
-                        log.trace("Partition {} for topic {} switched by a concurrent append, retrying",
-                                partitionInfo.partition(), topic);
+                    if (partitionChanged(topic, topicInfo, partitionInfo, dq, nowMs, cluster))
                         continue;
-                    }
+
                     RecordAppendResult appendResult = tryAppend(timestamp, key, value, headers, callbacks, dq, nowMs);
                     if (appendResult != null) {
-                        topicInfo.builtInPartitioner.updatePartitionInfo(partitionInfo, appendResult.appendedBytes, cluster);
+                        // If queue has incomplete batches we disable switch (see comments in updatePartitionInfo).
+                        boolean enableSwitch = allBatchesFull(dq);
+                        topicInfo.builtInPartitioner.updatePartitionInfo(partitionInfo, appendResult.appendedBytes, cluster, enableSwitch);
                         return appendResult;
                     }
                 }
@@ -297,21 +334,26 @@ public class RecordAccumulator {
                     byte maxUsableMagic = apiVersions.maxUsableProduceMagic();
                     int size = Math.max(this.batchSize, AbstractRecords.estimateSizeInBytesUpperBound(maxUsableMagic, compression, key, value, headers));
                     log.trace("Allocating a new {} byte message buffer for topic {} partition {} with remaining timeout {}ms", size, topic, partition, maxTimeToBlock);
+                    // This call may block if we exhausted buffer space.
                     buffer = free.allocate(size, maxTimeToBlock);
+                    // Update the current time in case the buffer allocation blocked above.
+                    // NOTE: getting time may be expensive, so calling it under a lock
+                    // should be avoided.
+                    nowMs = time.milliseconds();
                 }
 
                 synchronized (dq) {
                     // After taking the lock, validate that the partition hasn't changed and retry.
-                    if (topicInfo.builtInPartitioner.isPartitionChanged(partitionInfo)) {
-                        log.trace("Partition {} for topic {} switched by a concurrent append, retrying",
-                                partitionInfo.partition(), topic);
+                    if (partitionChanged(topic, topicInfo, partitionInfo, dq, nowMs, cluster))
                         continue;
-                    }
-                    RecordAppendResult appendResult = appendNewBatch(topic, effectivePartition, dq, timestamp, key, value, headers, callbacks, buffer);
+
+                    RecordAppendResult appendResult = appendNewBatch(topic, effectivePartition, dq, timestamp, key, value, headers, callbacks, buffer, nowMs);
                     // Set buffer to null, so that deallocate doesn't return it back to free pool, since it's used in the batch.
                     if (appendResult.newBatchCreated)
                         buffer = null;
-                    topicInfo.builtInPartitioner.updatePartitionInfo(partitionInfo, appendResult.appendedBytes, cluster);
+                    // If queue has incomplete batches we disable switch (see comments in updatePartitionInfo).
+                    boolean enableSwitch = allBatchesFull(dq);
+                    topicInfo.builtInPartitioner.updatePartitionInfo(partitionInfo, appendResult.appendedBytes, cluster, enableSwitch);
                     return appendResult;
                 }
             }
@@ -333,6 +375,7 @@ public class RecordAccumulator {
      * @param headers the Headers for the record
      * @param callbacks The callbacks to execute
      * @param buffer The buffer for the new batch
+     * @param nowMs The current time, in milliseconds
      */
     private RecordAppendResult appendNewBatch(String topic,
                                               int partition,
@@ -342,11 +385,10 @@ public class RecordAccumulator {
                                               byte[] value,
                                               Header[] headers,
                                               AppendCallbacks callbacks,
-                                              ByteBuffer buffer) {
+                                              ByteBuffer buffer,
+                                              long nowMs) {
         assert partition != RecordMetadata.UNKNOWN_PARTITION;
 
-        // Update the current time in case the buffer allocation blocked above.
-        long nowMs = time.milliseconds();
         RecordAppendResult appendResult = tryAppend(timestamp, key, value, headers, callbacks, dq, nowMs);
         if (appendResult != null) {
             // Somebody else found us a batch, return the one we waited for! Hopefully this doesn't happen often...
@@ -373,6 +415,15 @@ public class RecordAccumulator {
     }
 
     /**
+     * Check if all batches in the queue are full.
+     */
+    private boolean allBatchesFull(Deque<ProducerBatch> deque) {
+        // Only the last batch may be incomplete, so we just check that.
+        ProducerBatch last = deque.peekLast();
+        return last == null || last.isFull();
+    }
+
+     /**
      *  Try to append to a ProducerBatch.
      *
      *  If it is full, we return null and a new batch is created. We also close the batch for record appends to free up
