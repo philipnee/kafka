@@ -26,4 +26,6 @@ package org.apache.kafka.clients.consumer.internals;
 public interface EventHandler<T, K> {
     public K poll();
     public boolean add(T event);
+
+    public void close();
 }

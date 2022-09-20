@@ -16,29 +16,49 @@
  */
 package org.apache.kafka.clients.consumer.internals;
 
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.events.ConsumerEvent;
+import org.apache.kafka.clients.consumer.events.ServerEvent;
 import org.apache.kafka.clients.consumer.internals.events.ConsumerRequestEvent;
 import org.apache.kafka.clients.consumer.internals.events.ConsumerResponseEvent;
+import org.apache.kafka.common.internals.ClusterResourceListeners;
+import org.apache.kafka.common.metrics.Metrics;
 
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
 public class DefaultEventHandler implements EventHandler<ConsumerRequestEvent, ConsumerResponseEvent> {
-    BlockingQueue<ConsumerRequestEvent> consumerRequestEvents;
-    BlockingQueue<ConsumerResponseEvent> consumerResponseEvents;
+    BlockingQueue<ConsumerRequestEvent> consumerRequestEventQueue;
+    BlockingQueue<ConsumerResponseEvent> consumerResponseEventQueue;
+    private final ConsumerBackgroundThread backgroundThread;
 
-    public DefaultEventHandler() {
-        this.consumerRequestEvents = new LinkedBlockingQueue<>();
-        this.consumerResponseEvents = new LinkedBlockingQueue<>();
-        // TODO: a concreted implementation of how requests are being consumed, and how responses are being produced.
+    public DefaultEventHandler(ConsumerConfig config,
+                               SubscriptionState subscriptions, // TODO: it is currently a shared state between polling and background thread
+                               ClusterResourceListeners clusterResourceListeners,
+                               Metrics metrics) {
+        this.consumerRequestEventQueue = new LinkedBlockingQueue<>();
+        this.consumerResponseEventQueue = new LinkedBlockingQueue<>();
+        this.backgroundThread = new ConsumerBackgroundThread(config, subscriptions, clusterResourceListeners, metrics, consumerRequestEventQueue, consumerResponseEventQueue);
+
+        this.backgroundThread.start();
     }
 
     @Override
     public ConsumerResponseEvent poll() {
-        return consumerResponseEvents.poll();
+        return consumerResponseEventQueue.poll();
+    }
+
+    public boolean hasResponseEvent() {
+        return !consumerResponseEventQueue.isEmpty();
     }
 
     @Override
     public boolean add(ConsumerRequestEvent event) {
-        return consumerRequestEvents.add(event);
+        return consumerRequestEventQueue.add(event);
+    }
+
+    @Override
+    public void close() {
+        this.backgroundThread.close();
     }
 }

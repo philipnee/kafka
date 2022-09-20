@@ -497,62 +497,59 @@ public final class ConsumerAsyncCoordinator extends AbstractAsyncCoordinator {
                 throw new IllegalStateException("User configured " + ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG +
                         " to empty while trying to subscribe for group protocol to auto assign partitions");
             }
-            // Always update the heartbeat last poll time so that the heartbeat thread does not leave the
-            // group proactively due to application inactivity even if (say) the coordinator cannot be found.
-            //pollHeartbeat(timer.currentTimeMs());
+
             if (coordinatorUnknown()) {
                 return false;
             }
 
-            if (rejoinNeededOrPending()) {
-                // due to a race condition between the initial metadata fetch and the initial rebalance,
-                // we need to ensure that the metadata is fresh before joining initially. This ensures
-                // that we have matched the pattern against the cluster's topics at least once before joining.
-                if (subscriptions.hasPatternSubscription()) {
-                    // For consumer group that uses pattern-based subscription, after a topic is created,
-                    // any consumer that discovers the topic after metadata refresh can trigger rebalance
-                    // across the entire consumer group. Multiple rebalances can be triggered after one topic
-                    // creation if consumers refresh metadata at vastly different times. We can significantly
-                    // reduce the number of rebalances caused by single topic creation by asking consumer to
-                    // refresh metadata before re-joining the group as long as the refresh backoff time has
-                    // passed.
-                    if (this.metadata.timeToAllowUpdate(timer.currentTimeMs()) == 0) {
-                        this.metadata.requestUpdate();
-                    }
-
-                    if (!client.ensureFreshMetadata(timer)) {
-                        return false;
-                    }
-
-                    maybeUpdateSubscriptionMetadata();
+            if (!rejoinNeededOrPending()) {
+                return true;
+            }
+            // due to a race condition between the initial metadata fetch and the initial rebalance,
+            // we need to ensure that the metadata is fresh before joining initially. This ensures
+            // that we have matched the pattern against the cluster's topics at least once before joining.
+            if (subscriptions.hasPatternSubscription()) {
+                // For consumer group that uses pattern-based subscription, after a topic is created,
+                // any consumer that discovers the topic after metadata refresh can trigger rebalance
+                // across the entire consumer group. Multiple rebalances can be triggered after one topic
+                // creation if consumers refresh metadata at vastly different times. We can significantly
+                // reduce the number of rebalances caused by single topic creation by asking consumer to
+                // refresh metadata before re-joining the group as long as the refresh backoff time has
+                // passed.
+                if (this.metadata.timeToAllowUpdate(timer.currentTimeMs()) == 0) {
+                    this.metadata.requestUpdate();
                 }
 
-                // if not wait for join group, we would just use a timer of 0
-                if (!ensureActiveGroup()) {
-                    // since we may use a different timer in the callee, we'd still need
-                    // to update the original timer's current time after the call
-                    timer.update(time.milliseconds());
-
+                if (!client.ensureFreshMetadata(timer)) {
                     return false;
                 }
-            }
-        } else {
-            // For manually assigned partitions, we do not try to pro-actively lookup coordinator;
-            // instead we only try to refresh metadata when necessary.
-            // If connections to all nodes fail, wakeups triggered while attempting to send fetch
-            // requests result in polls returning immediately, causing a tight loop of polls. Without
-            // the wakeup, poll() with no channels would block for the timeout, delaying re-connection.
-            // awaitMetadataUpdate() in ensureCoordinatorReady initiates new connections with configured backoff and avoids the busy loop.
-            if (metadata.updateRequested() && !client.hasReadyNodes(timer.currentTimeMs())) {
-                client.awaitMetadataUpdate(timer);
+
+                maybeUpdateSubscriptionMetadata();
             }
 
-            // if there is pending coordinator requests, ensure they have a chance to be transmitted.
-            client.pollNoWakeup();
+            // if not wait for join group, we would just use a timer of 0
+            if (!ensureActiveGroup()) {
+                // since we may use a different timer in the callee, we'd still need
+                // to update the original timer's current time after the call
+                timer.update(time.milliseconds());
+
+                return false;
+            }
+
+            return true;
+        }
+        // For manually assigned partitions, we do not try to pro-actively lookup coordinator;
+        // instead we only try to refresh metadata when necessary.
+        // If connections to all nodes fail, wakeups triggered while attempting to send fetch
+        // requests result in polls returning immediately, causing a tight loop of polls. Without
+        // the wakeup, poll() with no channels would block for the timeout, delaying re-connection.
+        // awaitMetadataUpdate() in ensureCoordinatorReady initiates new connections with configured backoff and avoids the busy loop.
+        if (metadata.updateRequested() && !client.hasReadyNodes(timer.currentTimeMs())) {
+            client.awaitMetadataUpdate(timer);
         }
 
         maybeAutoCommitOffsetsAsync(timer.currentTimeMs());
-        return maybeSendHeartbeat(timer.currentTimeMs());
+        return true;
     }
 
     private boolean maybeSendHeartbeat(long currentTimeMs) {

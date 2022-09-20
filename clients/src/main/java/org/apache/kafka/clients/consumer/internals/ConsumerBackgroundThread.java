@@ -248,8 +248,8 @@ public class ConsumerBackgroundThread<K,V> extends KafkaThread implements AutoCl
                     log.warn("lost coordinator");
                     break;
                 }
-                this.coordinator.poll();
                 maybeSendHeartbeat();
+                this.coordinator.poll();
                 break;
             case DOWN:
                 log.info("closed");
