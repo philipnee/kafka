@@ -158,6 +158,7 @@ abstract class IntegrationTestHarness extends KafkaServerTestHarness {
     consumer
   }
 
+  def createAsyncConsumer[K, V](keyDeserializer: Deserializer[K] = new
       ByteArrayDeserializer,
                                   valueDeserializer: Deserializer[V] = new ByteArrayDeserializer,
                                   configOverrides: Properties = new Properties,
