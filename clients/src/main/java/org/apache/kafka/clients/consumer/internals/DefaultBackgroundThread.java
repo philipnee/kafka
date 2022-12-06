@@ -56,6 +56,7 @@ public class DefaultBackgroundThread extends KafkaThread {
     private final ApplicationEventProcessor applicationEventProcessor;
     private final NetworkClientDelegate networkClientDelegate;
     private final ErrorEventHandler errorEventHandler;
+    private final Optional<GroupStateManager> groupState;
 
     private boolean running;
 
@@ -69,7 +70,8 @@ public class DefaultBackgroundThread extends KafkaThread {
                             final ApplicationEventProcessor processor,
                             final ConsumerMetadata metadata,
                             final NetworkClientDelegate networkClient,
-                            final CoordinatorRequestManager coordinatorManager) {
+                            final CoordinatorRequestManager coordinatorManager,
+                            final GroupStateManager groupStateManager) {
         super(BACKGROUND_THREAD_NAME, true);
         this.time = time;
         this.running = true;
@@ -82,6 +84,7 @@ public class DefaultBackgroundThread extends KafkaThread {
         this.networkClientDelegate = networkClient;
         this.coordinatorManager = Optional.ofNullable(coordinatorManager);
         this.errorEventHandler = errorEventHandler;
+        this.groupState = Optional.ofNullable(groupStateManager);
     }
     public DefaultBackgroundThread(final Time time,
                                    final ConsumerConfig config,
@@ -108,15 +111,19 @@ public class DefaultBackgroundThread extends KafkaThread {
             this.running = true;
             this.errorEventHandler = new ErrorEventHandler(this.backgroundEventQueue);
             String groupId = rebalanceConfig.groupId;
-            this.coordinatorManager = groupId == null ?
-                    Optional.empty() :
-                    Optional.of(new CoordinatorRequestManager(
-                            time,
-                            logContext,
-                            config,
-                            errorEventHandler,
-                            groupId,
-                            rebalanceConfig.rebalanceTimeoutMs));
+            if (groupId == null) {
+                this.coordinatorManager = Optional.empty();
+                this.groupState = Optional.empty();
+            } else {
+                this.coordinatorManager = Optional.of(new CoordinatorRequestManager(
+                        time,
+                        logContext,
+                        config,
+                        errorEventHandler,
+                        groupId,
+                        rebalanceConfig.rebalanceTimeoutMs));
+                this.groupState = Optional.of(new GroupStateManager(groupId, rebalanceConfig.groupInstanceId));
+            }
             this.applicationEventProcessor = new ApplicationEventProcessor(
                     this.coordinatorManager,
                     backgroundEventQueue);

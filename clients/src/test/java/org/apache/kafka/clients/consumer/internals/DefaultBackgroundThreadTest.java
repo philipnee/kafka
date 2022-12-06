@@ -148,7 +148,8 @@ public class DefaultBackgroundThreadTest {
                 processor,
                 this.metadata,
                 this.networkClient,
-                this.coordinatorManager);
+                this.coordinatorManager,
+                null);
     }
 
     private NetworkClientDelegate.PollResult mockPollResult() {

@@ -237,10 +237,19 @@ public class NetworkClientDelegate implements AutoCloseable {
                 final Timer timeoutTimer,
                 final AbstractRequest.Builder<?> requestBuilder,
                 final AbstractRequestFutureCompletionHandler callback) {
+            return makeUnsentRequest(timeoutTimer, requestBuilder, callback, null);
+        }
+
+        public static UnsentRequest makeUnsentRequest(
+                final Timer timeoutTimer,
+                final AbstractRequest.Builder<?> requestBuilder,
+                final AbstractRequestFutureCompletionHandler callback,
+                final Node node) {
             return new UnsentRequest(
                     requestBuilder,
                     callback,
-                    timeoutTimer);
+                    timeoutTimer,
+                    node);
         }
 
         @Override
