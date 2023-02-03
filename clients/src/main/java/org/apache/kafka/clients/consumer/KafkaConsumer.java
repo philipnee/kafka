@@ -562,6 +562,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     private static final long NO_CURRENT_THREAD = -1L;
     private static final String JMX_PREFIX = "kafka.consumer";
     static final long DEFAULT_CLOSE_TIMEOUT_MS = 30 * 1000;
+    private static final long DEFAULT_BOOTSTRAP_RETRY_MS = 3000;
     static final String DEFAULT_REASON = "rebalance enforced by user";
 
     // Visible for testing
@@ -728,8 +729,11 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     !config.getBoolean(ConsumerConfig.EXCLUDE_INTERNAL_TOPICS_CONFIG),
                     config.getBoolean(ConsumerConfig.ALLOW_AUTO_CREATE_TOPICS_CONFIG),
                     subscriptions, logContext, clusterResourceListeners);
-            List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(
-                    config.getList(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG), config.getString(ConsumerConfig.CLIENT_DNS_LOOKUP_CONFIG));
+            List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddressesWithRetry(
+                    time.timer(DEFAULT_BOOTSTRAP_RETRY_MS),
+                    config.getList(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG),
+                    config.getString(ConsumerConfig.CLIENT_DNS_LOOKUP_CONFIG),
+                    config.getLong(ConsumerConfig.RETRY_BACKOFF_MS_CONFIG));
             this.metadata.bootstrap(addresses);
             String metricGrpPrefix = "consumer";
 

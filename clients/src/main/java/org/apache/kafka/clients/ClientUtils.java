@@ -25,6 +25,7 @@ import org.apache.kafka.common.security.JaasContext;
 import org.apache.kafka.common.security.auth.SecurityProtocol;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
+import org.apache.kafka.common.utils.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,8 +45,27 @@ public final class ClientUtils {
     private ClientUtils() {
     }
 
+    public static List<InetSocketAddress> parseAndValidateAddressesWithRetry(final Timer timer,
+                                                                             final List<String> urls,
+                                                                             final String clientDnsLookupConfig,
+                                                                             final long backoffMs) {
+        while (timer.notExpired()) {
+            try {
+                return parseAndValidateAddresses(urls, clientDnsLookupConfig);
+            } catch (ConfigException e) {
+                log.debug("No resolvable bootstrap urls given in " + CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG);
+            }
+            timer.sleep(backoffMs);
+        }
+        throw new ConfigException("Timeout upon retrying the bootstrap address " + CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG);
+    }
+
+
     public static List<InetSocketAddress> parseAndValidateAddresses(List<String> urls, String clientDnsLookupConfig) {
-        return parseAndValidateAddresses(urls, ClientDnsLookup.forConfig(clientDnsLookupConfig));
+        List<InetSocketAddress> addresses = parseAndValidateAddresses(urls, ClientDnsLookup.forConfig(clientDnsLookupConfig));
+        if (addresses.isEmpty())
+            throw new ConfigException("No resolvable bootstrap urls given in " + CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG);
+        return addresses;
     }
 
     public static List<InetSocketAddress> parseAndValidateAddresses(List<String> urls, ClientDnsLookup clientDnsLookup) {
@@ -85,8 +105,8 @@ public final class ClientUtils {
                 }
             }
         }
-        if (addresses.isEmpty())
-            throw new ConfigException("No resolvable bootstrap urls given in " + CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG);
+        //if (addresses.isEmpty())
+        //    throw new ConfigException("No resolvable bootstrap urls given in " + CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG);
         return addresses;
     }
 
