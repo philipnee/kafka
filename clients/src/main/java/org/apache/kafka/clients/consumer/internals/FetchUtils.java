@@ -16,19 +16,14 @@
  */
 package org.apache.kafka.clients.consumer.internals;
 
-import org.apache.kafka.clients.consumer.internals.events.BackgroundEvent;
-import org.apache.kafka.clients.consumer.internals.events.ErrorBackgroundEvent;
+import org.apache.kafka.common.TopicPartition;
 
-import java.util.Queue;
+public class FetchUtils {
 
-public class ErrorEventHandler {
-    private final Queue<BackgroundEvent> backgroundEventQueue;
-
-    public ErrorEventHandler(Queue<BackgroundEvent> backgroundEventQueue) {
-        this.backgroundEventQueue = backgroundEventQueue;
-    }
-
-    public void handle(Throwable e) {
-        backgroundEventQueue.add(new ErrorBackgroundEvent(e));
+    public static void requestMetadataUpdate(final ConsumerMetadata metadata,
+                                             final SubscriptionState subscriptions,
+                                             final TopicPartition topicPartition) {
+        metadata.requestUpdate();
+        subscriptions.clearPreferredReadReplica(topicPartition);
     }
 }

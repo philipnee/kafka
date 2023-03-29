@@ -57,7 +57,7 @@ import java.util.Set;
  * @param <K> Record key type
  * @param <V> Record value type
  */
-class CompletedFetch<K, V> {
+public class CompletedFetch<K, V> {
 
     final TopicPartition partition;
     final FetchResponseData.PartitionData partitionData;
@@ -65,12 +65,12 @@ class CompletedFetch<K, V> {
 
     long nextFetchOffset;
     Optional<Integer> lastEpoch;
-    boolean isConsumed = false;
     boolean initialized = false;
 
     private final Logger log;
     private final SubscriptionState subscriptions;
     private final FetchConfig<K, V> fetchConfig;
+    private final Deserializers<K, V> deserializers;
     private final BufferSupplier decompressionBufferSupplier;
     private final Iterator<? extends RecordBatch> batches;
     private final Set<Long> abortedProducerIds;
@@ -84,6 +84,7 @@ class CompletedFetch<K, V> {
     private CloseableIterator<Record> records;
     private Exception cachedRecordException = null;
     private boolean corruptLastRecord = false;
+    private boolean isConsumed = false;
 
     CompletedFetch(LogContext logContext,
                    SubscriptionState subscriptions,
@@ -97,6 +98,7 @@ class CompletedFetch<K, V> {
         this.log = logContext.logger(CompletedFetch.class);
         this.subscriptions = subscriptions;
         this.fetchConfig = fetchConfig;
+        this.deserializers = null;
         this.decompressionBufferSupplier = decompressionBufferSupplier;
         this.partition = partition;
         this.partitionData = partitionData;
@@ -107,6 +109,10 @@ class CompletedFetch<K, V> {
         this.lastEpoch = Optional.empty();
         this.abortedProducerIds = new HashSet<>();
         this.abortedTransactions = abortedTransactions(partitionData);
+    }
+
+    public boolean isConsumed() {
+        return isConsumed;
     }
 
     /**
@@ -123,17 +129,18 @@ class CompletedFetch<K, V> {
      * caller invokes {@link #fetchRecords(int)}; an empty {@link List list} will be returned instead.
      */
     void drain() {
-        if (!isConsumed) {
-            maybeCloseRecordStream();
-            cachedRecordException = null;
-            this.isConsumed = true;
-            recordAggregatedMetrics(bytesRead, recordsRead);
+        if (isConsumed())
+            return;
 
-            // we move the partition to the end if we received some bytes. This way, it's more likely that partitions
-            // for the same topic can remain together (allowing for more efficient serialization).
-            if (bytesRead > 0)
-                subscriptions.movePartitionToEnd(partition);
-        }
+        maybeCloseRecordStream();
+        cachedRecordException = null;
+        isConsumed = true;
+        recordAggregatedMetrics(bytesRead, recordsRead);
+
+        // we move the partition to the end if we received some bytes. This way, it's more likely that partitions
+        // for the same topic can remain together (allowing for more efficient serialization).
+        if (bytesRead > 0)
+            subscriptions.movePartitionToEnd(partition);
     }
 
     private void maybeEnsureValid(RecordBatch batch) {
@@ -240,7 +247,7 @@ class CompletedFetch<K, V> {
                     + ". If needed, please seek past the record to "
                     + "continue consumption.", cachedRecordException);
 
-        if (isConsumed)
+        if (isConsumed())
             return Collections.emptyList();
 
         List<ConsumerRecord<K, V>> records = new ArrayList<>();

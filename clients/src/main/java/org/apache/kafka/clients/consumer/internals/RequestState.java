@@ -19,6 +19,7 @@ package org.apache.kafka.clients.consumer.internals;
 import org.apache.kafka.common.utils.ExponentialBackoff;
 
 class RequestState {
+
     final static int RETRY_BACKOFF_EXP_BASE = 2;
     final static double RETRY_BACKOFF_JITTER = 0.2;
     private final ExponentialBackoff exponentialBackoff;
@@ -27,13 +28,8 @@ class RequestState {
     private int numAttempts = 0;
     private long backoffMs = 0;
 
-    public RequestState(long retryBackoffMs) {
-        this.exponentialBackoff = new ExponentialBackoff(
-            retryBackoffMs,
-            RETRY_BACKOFF_EXP_BASE,
-            retryBackoffMs,
-            RETRY_BACKOFF_JITTER
-        );
+    public RequestState(final long retryBackoffMs) {
+        this(retryBackoffMs, RETRY_BACKOFF_EXP_BASE, retryBackoffMs, RETRY_BACKOFF_JITTER);
     }
 
     // Visible for testing
@@ -41,12 +37,10 @@ class RequestState {
                  final int retryBackoffExpBase,
                  final long retryBackoffMaxMs,
                  final double jitter) {
-        this.exponentialBackoff = new ExponentialBackoff(
-            retryBackoffMs,
-            retryBackoffExpBase,
-            retryBackoffMaxMs,
-            jitter
-        );
+        this.exponentialBackoff = new ExponentialBackoff(retryBackoffMs,
+                retryBackoffExpBase,
+                retryBackoffMaxMs,
+                jitter);
     }
 
     /**
@@ -66,8 +60,7 @@ class RequestState {
             return true;
         }
 
-        if (this.lastReceivedMs == -1 ||
-                this.lastReceivedMs < this.lastSentMs) {
+        if (this.lastReceivedMs == -1 || this.lastReceivedMs < this.lastSentMs) {
             // there is an inflight request
             return false;
         }
@@ -113,5 +106,16 @@ class RequestState {
     long remainingBackoffMs(final long currentTimeMs) {
         long timeSinceLastReceiveMs = currentTimeMs - this.lastReceivedMs;
         return Math.max(0, backoffMs - timeSinceLastReceiveMs);
+    }
+
+    @Override
+    public String toString() {
+        return "RequestState{" +
+                "exponentialBackoff=" + exponentialBackoff +
+                ", lastSentMs=" + lastSentMs +
+                ", lastReceivedMs=" + lastReceivedMs +
+                ", numAttempts=" + numAttempts +
+                ", backoffMs=" + backoffMs +
+                '}';
     }
 }

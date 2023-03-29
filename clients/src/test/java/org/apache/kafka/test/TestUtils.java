@@ -17,6 +17,7 @@
 package org.apache.kafka.test;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.internals.NodeStatusDetector;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.Node;
@@ -86,6 +87,18 @@ public class TestUtils {
     public static final Random RANDOM = new Random();
     public static final long DEFAULT_POLL_INTERVAL_MS = 100;
     public static final long DEFAULT_MAX_WAIT_MS = 15000;
+
+    public static final NodeStatusDetector TEST_NODE_STATUS_DETECTOR = new NodeStatusDetector() {
+
+        @Override
+        public boolean isUnavailable(Node node) {
+            return false;
+        }
+
+        @Override
+        public void maybeThrowAuthFailure(Node node) {
+        }
+    };
 
     public static Cluster singletonCluster() {
         return clusterWith(1);
