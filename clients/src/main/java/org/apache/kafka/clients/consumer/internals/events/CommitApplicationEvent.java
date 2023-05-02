@@ -16,14 +16,14 @@
  */
 package org.apache.kafka.clients.consumer.internals.events;
 
+import org.apache.kafka.clients.ClientResponse;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 
 import java.util.Collections;
 import java.util.Map;
 
-public class CommitApplicationEvent extends CompletableApplicationEvent<Void> {
-
+public class CommitApplicationEvent extends CompletableApplicationEvent<ClientResponse> {
     private final Map<TopicPartition, OffsetAndMetadata> offsets;
 
     public CommitApplicationEvent(final Map<TopicPartition, OffsetAndMetadata> offsets) {

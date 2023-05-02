@@ -87,7 +87,8 @@ public class DefaultBackgroundThread extends KafkaThread {
                             final ApplicationEventProcessor processor,
                             final CoordinatorRequestManager coordinatorManager,
                             final CommitRequestManager commitRequestManager,
-                            final ListOffsetsRequestManager listOffsetsRequestManager) {
+                            final ListOffsetsRequestManager listOffsetsRequestManager,
+                            final TopicMetadataRequestManager topicMetadataRequestManager) {
         super(BACKGROUND_THREAD_NAME, true);
         this.time = time;
         this.log = logContext.logger(getClass());
@@ -103,6 +104,7 @@ public class DefaultBackgroundThread extends KafkaThread {
 
         this.requestManagers = new RequestManagers(
                 listOffsetsRequestManager,
+                topicMetadataRequestManager,
                 Optional.ofNullable(coordinatorManager),
                 Optional.ofNullable(commitRequestManager));
     }
@@ -153,11 +155,15 @@ public class DefaultBackgroundThread extends KafkaThread {
                             logContext);
             CoordinatorRequestManager coordinatorRequestManager = null;
             CommitRequestManager commitRequestManager = null;
+            TopicMetadataRequestManager topicMetadataRequestManger = new TopicMetadataRequestManager(
+                this.time,
+                logContext,
+                config);
 
             if (groupState.groupId != null) {
                 coordinatorRequestManager = new CoordinatorRequestManager(this.time,
                         logContext,
-                        retryBackoffMs,
+                        retryBackoffMs, // TODO: let's pass in the config directly
                         this.errorEventHandler,
                         groupState.groupId);
                 commitRequestManager = new CommitRequestManager(this.time,
@@ -166,12 +172,17 @@ public class DefaultBackgroundThread extends KafkaThread {
                         config,
                         coordinatorRequestManager,
                         groupState);
-            }
-
-            this.requestManagers = new RequestManagers(
+                this.requestManagers = new RequestManagers(
+                    Optional.of(coordinatorManager),
+                    Optional.of(commitRequestManager),
+                    topicMetadataRequestManger);
+            } else {
+                this.requestManagers = new RequestManagers(
                     offsetsRequestManager,
-                    Optional.ofNullable(coordinatorRequestManager),
-                    Optional.ofNullable(commitRequestManager));
+                    topicMetadataRequestManger,
+                    Optional.empty(),
+                    Optional.empty());
+            }
 
             this.applicationEventProcessor = new ApplicationEventProcessor(
                     backgroundEventQueue,
@@ -204,10 +215,10 @@ public class DefaultBackgroundThread extends KafkaThread {
             }
         } catch (final Throwable t) {
             log.error("The background thread failed due to unexpected error", t);
-            throw new RuntimeException(t);
+            throw new KafkaException(t);
         } finally {
             close();
-            log.debug("Exited run loop");
+            log.debug("Background thread closed");
         }
     }
 
