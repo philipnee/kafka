@@ -54,10 +54,10 @@ class OffsetFetcherUtils {
     private final AtomicInteger metadataUpdateVersion = new AtomicInteger(-1);
 
     OffsetFetcherUtils(LogContext logContext,
-                              ConsumerMetadata metadata,
-                              SubscriptionState subscriptionState,
-                              Time time,
-                              ApiVersions apiVersions) {
+                       ConsumerMetadata metadata,
+                       SubscriptionState subscriptionState,
+                       Time time,
+                       ApiVersions apiVersions) {
         this.log = logContext.logger(getClass());
         this.metadata = metadata;
         this.subscriptionState = subscriptionState;
