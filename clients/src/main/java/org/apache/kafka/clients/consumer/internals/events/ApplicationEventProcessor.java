@@ -18,6 +18,7 @@ package org.apache.kafka.clients.consumer.internals.events;
 
 import org.apache.kafka.clients.consumer.internals.CommitRequestManager;
 import org.apache.kafka.clients.consumer.internals.ConsumerMetadata;
+import org.apache.kafka.clients.consumer.internals.ListOffsetsRequestManager;
 import org.apache.kafka.clients.consumer.internals.RequestManagers;
 import org.apache.kafka.common.KafkaException;
 
@@ -55,6 +56,8 @@ public class ApplicationEventProcessor {
                 return process((MetadataUpdateApplicationEvent) event);
             case UNSUBSCRIBE:
                 return process((UnsubscribeApplicationEvent) event);
+            case LIST_OFFSETS:
+                return process((ListOffsetsApplicationEvent) event);
         }
         return false;
     }
@@ -121,6 +124,26 @@ public class ApplicationEventProcessor {
                 this.coordinator.onLeavePrepare();
                 this.coordinator.maybeLeaveGroup("the consumer unsubscribed from all topics");
          */
+        return true;
+    }
+
+    private boolean process(final ListOffsetsApplicationEvent event) {
+        if (!requestManagers.listOffsetsRequestManager.isPresent()) {
+            event.future().completeExceptionally(new KafkaException("Unable to list offsets " +
+                "because the ListOffsetsRequestManager is not available."));
+            return false;
+        }
+        ListOffsetsRequestManager listOffsetsRequestManager =
+                requestManagers.listOffsetsRequestManager.get();
+        listOffsetsRequestManager.fetchOffsets(event.partitions, event.timestamp,
+                        event.requireTimestamps)
+                .whenComplete((result, error) -> {
+                    if (error != null) {
+                        event.future().completeExceptionally(error);
+                        return;
+                    }
+                    event.future().complete(result);
+                });
         return true;
     }
 }

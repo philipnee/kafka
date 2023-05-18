@@ -59,6 +59,7 @@ public class DefaultBackgroundThread extends KafkaThread {
     private final BlockingQueue<ApplicationEvent> applicationEventQueue;
     private final BlockingQueue<BackgroundEvent> backgroundEventQueue;
     private final ConsumerMetadata metadata;
+    private final SubscriptionState subscriptionState;
     private final ConsumerConfig config;
     // empty if groupId is null
     private final ApplicationEventProcessor applicationEventProcessor;
@@ -71,6 +72,7 @@ public class DefaultBackgroundThread extends KafkaThread {
     private final RequestManagers requestManagers;
 
     // Visible for testing
+    @SuppressWarnings("checkstyle:parameternumber")
     DefaultBackgroundThread(final Time time,
                             final ConsumerConfig config,
                             final LogContext logContext,
@@ -78,11 +80,13 @@ public class DefaultBackgroundThread extends KafkaThread {
                             final BlockingQueue<BackgroundEvent> backgroundEventQueue,
                             final ConsumerMetadata metadata,
                             final NetworkClientDelegate networkClient,
+                            final SubscriptionState subscriptionState,
                             final GroupState groupState,
                             final ErrorEventHandler errorEventHandler,
                             final ApplicationEventProcessor processor,
                             final CoordinatorRequestManager coordinatorManager,
-                            final CommitRequestManager commitRequestManager) {
+                            final CommitRequestManager commitRequestManager,
+                            final ListOffsetsRequestManager listOffsetsRequestManager) {
         super(BACKGROUND_THREAD_NAME, true);
         this.time = time;
         this.log = logContext.logger(getClass());
@@ -92,11 +96,14 @@ public class DefaultBackgroundThread extends KafkaThread {
         this.config = config;
         this.metadata = metadata;
         this.networkClientDelegate = networkClient;
+        this.subscriptionState = subscriptionState;
         this.errorEventHandler = errorEventHandler;
         this.groupState = groupState;
 
-        this.requestManagers = new RequestManagers(Optional.ofNullable(coordinatorManager),
-                Optional.ofNullable(commitRequestManager));
+        this.requestManagers = new RequestManagers(
+                Optional.ofNullable(coordinatorManager),
+                Optional.ofNullable(commitRequestManager),
+                Optional.of(listOffsetsRequestManager));
     }
 
     public DefaultBackgroundThread(final Time time,
@@ -117,6 +124,7 @@ public class DefaultBackgroundThread extends KafkaThread {
             this.applicationEventQueue = applicationEventQueue;
             this.backgroundEventQueue = backgroundEventQueue;
             this.config = config;
+            this.subscriptionState = subscriptions;
             this.metadata = metadata;
 
             final NetworkClient networkClient = ClientUtils.createNetworkClient(config,
@@ -146,10 +154,20 @@ public class DefaultBackgroundThread extends KafkaThread {
                         config,
                         coordinatorManager,
                         groupState);
-                this.requestManagers = new RequestManagers(Optional.of(coordinatorManager),
-                        Optional.of(commitRequestManager));
+                ListOffsetsRequestManager offsetsRequestManager =
+                        new ListOffsetsRequestManager(
+                                subscriptionState,
+                                metadata,
+                                config,
+                                time,
+                                apiVersions,
+                                logContext);
+                this.requestManagers = new RequestManagers(
+                        Optional.of(coordinatorManager),
+                        Optional.of(commitRequestManager),
+                        Optional.of(offsetsRequestManager));
             } else {
-                this.requestManagers = new RequestManagers(Optional.empty(), Optional.empty());
+                this.requestManagers = new RequestManagers();
             }
 
             this.applicationEventProcessor = new ApplicationEventProcessor(backgroundEventQueue, requestManagers, metadata);

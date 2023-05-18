@@ -30,17 +30,25 @@ public class RequestManagers {
 
     public final Optional<CoordinatorRequestManager> coordinatorRequestManager;
     public final Optional<CommitRequestManager> commitRequestManager;
+    public final Optional<ListOffsetsRequestManager> listOffsetsRequestManager;
     private final List<Optional<? extends RequestManager>> entries;
 
     public RequestManagers(Optional<CoordinatorRequestManager> coordinatorRequestManager,
-                           Optional<CommitRequestManager> commitRequestManager) {
+                           Optional<CommitRequestManager> commitRequestManager,
+                           Optional<ListOffsetsRequestManager> listOffsetsRequestManager) {
         this.coordinatorRequestManager = coordinatorRequestManager;
         this.commitRequestManager = commitRequestManager;
+        this.listOffsetsRequestManager = listOffsetsRequestManager;
 
         List<Optional<? extends RequestManager>> list = new ArrayList<>();
         list.add(coordinatorRequestManager);
         list.add(commitRequestManager);
+        list.add(listOffsetsRequestManager);
         entries = Collections.unmodifiableList(list);
+    }
+
+    public RequestManagers() {
+        this(Optional.empty(), Optional.empty(), Optional.empty());
     }
 
     public List<Optional<? extends RequestManager>> entries() {
