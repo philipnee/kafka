@@ -23,8 +23,10 @@ import org.apache.kafka.clients.consumer.OffsetCommitCallback;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.clients.consumer.internals.events.CommitApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.EventHandler;
+import org.apache.kafka.clients.consumer.internals.events.ListOffsetsApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.MetadataUpdateApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.OffsetFetchApplicationEvent;
+import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.InvalidGroupIdException;
 import org.apache.kafka.common.internals.ClusterResourceListeners;
@@ -202,6 +204,42 @@ public class PrototypeAsyncConsumerTest {
     public void testAssignOnEmptyTopicInPartition() {
         consumer = newConsumer(time, new StringDeserializer(), new StringDeserializer());
         assertThrows(IllegalArgumentException.class, () -> consumer.assign(singleton(new TopicPartition("  ", 0))));
+    }
+
+    @Test
+    public void testBeginningOffsetsFailsIfNullPartitions() {
+        consumer = newConsumer(time, new StringDeserializer(), new StringDeserializer());
+        assertThrows(NullPointerException.class, () -> consumer.beginningOffsets(null,
+                Duration.ofMillis(1)));
+    }
+
+    @Test
+    public void testBeginningOffsets() {
+        HashMap<TopicPartition, OffsetAndMetadata> expectedPartitionOffsets =
+                mockTopicPartitionOffset();
+        Set<TopicPartition> partitions = expectedPartitionOffsets.keySet();
+        MockedConstruction<ListOffsetsApplicationEvent> mockedController = mockConstruction(ListOffsetsApplicationEvent.class,
+                (mock, ctx) -> when(mock.future())
+                        .thenReturn(CompletableFuture.completedFuture(new HashMap<>())));
+        consumer = newConsumer(time, new StringDeserializer(), new StringDeserializer());
+        assertDoesNotThrow(() -> consumer.beginningOffsets(partitions, Duration.ofMillis(1)));
+        verify(eventHandler).add(ArgumentMatchers.isA(ListOffsetsApplicationEvent.class));
+        mockedController.close();
+    }
+
+    @Test
+    public void testBeginningOffsetsThrowsKafkaExceptionForUnderlyingExecutionFailure() {
+        Set<TopicPartition> partitions = mockTopicPartitionOffset().keySet();
+        CompletableFuture<Map<TopicPartition, Long>> failedEventResult = new CompletableFuture<>();
+        failedEventResult.completeExceptionally(new RuntimeException("Unexpected failure " +
+                "processing List Offsets event"));
+        MockedConstruction<ListOffsetsApplicationEvent> mockedController = mockConstruction(ListOffsetsApplicationEvent.class,
+                (mock, ctx) -> when(mock.future()).thenReturn(failedEventResult));
+        consumer = newConsumer(time, new StringDeserializer(), new StringDeserializer());
+        assertThrows(KafkaException.class, () -> consumer.beginningOffsets(partitions,
+                        Duration.ofMillis(1)));
+        verify(eventHandler).add(ArgumentMatchers.isA(ListOffsetsApplicationEvent.class));
+        mockedController.close();
     }
 
     private HashMap<TopicPartition, OffsetAndMetadata> mockTopicPartitionOffset() {
