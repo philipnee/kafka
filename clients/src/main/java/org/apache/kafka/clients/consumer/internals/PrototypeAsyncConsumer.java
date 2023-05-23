@@ -315,9 +315,7 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
             return new HashMap<>();
         }
 
-        final OffsetFetchApplicationEvent event = new OffsetFetchApplicationEvent(partitions);
-        eventHandler.add(event);
-        return event.get(time.timer(timeout));
+        return eventHandler.addAndGet(new OffsetFetchApplicationEvent(partitions), timeout);
     }
 
     private void maybeThrowInvalidGroupIdException() {

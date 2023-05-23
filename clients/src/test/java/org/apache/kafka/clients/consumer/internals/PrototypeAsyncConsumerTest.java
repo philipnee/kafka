@@ -159,7 +159,7 @@ public class PrototypeAsyncConsumerTest {
             mockedCtor = mockConstruction(OffsetFetchApplicationEvent.class, (mock, ctx) -> when(mock.get(any())).thenReturn(new HashMap<>()));
             consumer = newConsumer(time, new StringDeserializer(), new StringDeserializer());
             assertDoesNotThrow(() -> consumer.committed(mockTopicPartitions, Duration.ofMillis(1)));
-            verify(eventHandler).add(ArgumentMatchers.isA(OffsetFetchApplicationEvent.class));
+            verify(eventHandler).addAndGet(ArgumentMatchers.isA(OffsetFetchApplicationEvent.class), any(Duration.class));
         } finally {
             if (mockedCtor != null)
                 mockedCtor.close();
