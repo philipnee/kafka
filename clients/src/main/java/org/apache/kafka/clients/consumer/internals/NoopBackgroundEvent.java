@@ -22,10 +22,11 @@ import org.apache.kafka.clients.consumer.internals.events.BackgroundEvent;
  * Noop event. Intentionally left it here for demonstration purpose.
  */
 public class NoopBackgroundEvent extends BackgroundEvent {
+
     public final String message;
 
     public NoopBackgroundEvent(final String message) {
-        super(EventType.NOOP);
+        super(Type.NOOP);
         this.message = message;
     }
 

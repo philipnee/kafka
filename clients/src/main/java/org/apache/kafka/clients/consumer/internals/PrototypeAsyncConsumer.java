@@ -317,18 +317,7 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
 
         final OffsetFetchApplicationEvent event = new OffsetFetchApplicationEvent(partitions);
         eventHandler.add(event);
-        try {
-            return event.complete(Duration.ofMillis(100));
-        } catch (InterruptedException e) {
-            throw new InterruptException(e);
-        } catch (TimeoutException e) {
-            throw new org.apache.kafka.common.errors.TimeoutException(e);
-        } catch (ExecutionException e) {
-            // Execution exception is thrown here
-            throw new KafkaException(e);
-        } catch (Exception e) {
-            throw e;
-        }
+        return event.get(time.timer(timeout));
     }
 
     private void maybeThrowInvalidGroupIdException() {
