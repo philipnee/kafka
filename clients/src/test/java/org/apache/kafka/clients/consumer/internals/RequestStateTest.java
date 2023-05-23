@@ -25,7 +25,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class RequestStateTest {
     @Test
     public void testRequestStateSimple() {
-        RequestState state = new RequestState(new LogContext(),
+        RequestState state = new RequestState(
+                new LogContext(),
                 100,
                 2,
                 1000,
