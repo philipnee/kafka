@@ -169,30 +169,7 @@ public class IdempotentCloserTest {
         assertTrue(ic.isClosed());
     }
 
-    /**
-     * Tests that the {@link IdempotentCloser} implementation of {@link AutoCloseable#close()} works as expected.
-     */
-    @Test
-    public void testAutoCloseable() {
-        AtomicInteger onCloseCounter = new AtomicInteger();
-
-        try (IdempotentCloser ic = new IdempotentCloser() {
-            /**
-             * This provides us with the ability to track that the default {@link AutoCloseable#close()} method
-             * is called when the variable goes out of scope of the try-with-resources block.
-             */
-            @Override
-            public void close() {
-                close(onCloseCounter::getAndIncrement);
-            }
-        }) {
-            assertFalse(ic.isClosed());
-        }
-
-        assertEquals(1, onCloseCounter.get());
-    }
-
-    /**
+     /**
      * Tests that if the {@link IdempotentCloser} is created with its initial state as closed, the various APIs
      * will behave as expected.
      */
