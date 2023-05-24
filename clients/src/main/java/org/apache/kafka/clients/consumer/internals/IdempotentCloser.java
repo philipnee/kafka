@@ -62,7 +62,8 @@ import java.util.function.Supplier;
  * }
  * </pre>
  *
- * Note that the callbacks are optional
+ * Note that the callbacks are optional and if unused operates as a simple means to ensure resources
+ * are only closed once.
  */
 public class IdempotentCloser implements AutoCloseable {
 
