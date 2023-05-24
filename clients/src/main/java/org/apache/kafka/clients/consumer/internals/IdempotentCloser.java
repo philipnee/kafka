@@ -67,7 +67,7 @@ import java.util.function.Supplier;
  */
 public class IdempotentCloser implements AutoCloseable {
 
-    private final AtomicBoolean flag;
+    private final AtomicBoolean isClosed;
 
     /**
      * Creates an {@code IdempotentCloser} that is not yet closed.
@@ -79,24 +79,24 @@ public class IdempotentCloser implements AutoCloseable {
     /**
      * Creates an {@code IdempotentCloser} with the given initial state.
      *
-     * @param flag Initial state of closer
+     * @param isClosed Initial value for underlying state
      */
-    public IdempotentCloser(boolean flag) {
-        this.flag = new AtomicBoolean(flag);
+    public IdempotentCloser(boolean isClosed) {
+        this.isClosed = new AtomicBoolean(isClosed);
     }
 
     public void maybeThrowIllegalStateException(Supplier<String> message) {
-        if (flag.get())
+        if (isClosed.get())
             throw new IllegalStateException(message.get());
     }
 
     public void maybeThrowIllegalStateException(String message) {
-        if (flag.get())
+        if (isClosed.get())
             throw new IllegalStateException(message);
     }
 
     public boolean isClosed() {
-        return flag.get();
+        return isClosed.get();
     }
 
     @Override
@@ -109,7 +109,7 @@ public class IdempotentCloser implements AutoCloseable {
     }
 
     public void close(final Runnable onInitialClose, final Runnable onSubsequentClose) {
-        if (flag.compareAndSet(false, true)) {
+        if (isClosed.compareAndSet(false, true)) {
             if (onInitialClose != null)
                 onInitialClose.run();
         } else {
@@ -121,7 +121,7 @@ public class IdempotentCloser implements AutoCloseable {
     @Override
     public String toString() {
         return "IdempotentCloser{" +
-                "flag=" + flag +
+                "isClosed=" + isClosed +
                 '}';
     }
 }
