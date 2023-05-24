@@ -17,16 +17,84 @@
 package org.apache.kafka.clients.consumer.internals;
 
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 /**
  * {@code IdempotentCloser} encapsulates some basic logic to ensure that a given resource is only closed once.
+ * It provides methods to invoke callbacks (via optional {@link Runnable}s) for either the <em>initial</em> close
+ * and/or any <em>subsequent</em> closes.
+ *
+ * <p/>
+ *
+ * Here's an example:
+ *
+ * <pre>
+ *
+ * public class MyDataFile implements Closeable {
+ *
+ *     private final IdempotentCloser closer = new IdempotentCloser();
+ *
+ *     private final File file;
+ *
+ *     . . .
+ *
+ *     public boolean write() {
+ *         closer.maybeThrowIllegalStateException(() -> String.format("Data file %s already closed!", file));
+ *         writeToFile();
+ *     }
+ *
+ *
+ *     public boolean isClosed() {
+ *         return closer.isClosed();
+ *     }
+ *
+ *     &#064;Override
+ *     public void close() {
+ *         Runnable onInitialClose = () -> {
+ *             cleanUpFile(file);
+ *             log.debug("Data file {} closed", file);
+ *         };
+ *         Runnable onSubsequentClose = () -> {
+ *             log.warn("Data file {} already closed!", file);
+ *         };
+ *         closer.close(onInitialClose, onSubsequentClose);
+ *     }
+ * }
+ * </pre>
+ *
+ * Note that the callbacks are optional
  */
 public class IdempotentCloser implements AutoCloseable {
 
-    private final AtomicBoolean flag = new AtomicBoolean(false);
+    private final AtomicBoolean flag;
+
+    /**
+     * Creates an {@code IdempotentCloser} that is not yet closed.
+     */
+    public IdempotentCloser() {
+        this(false);
+    }
+
+    /**
+     * Creates an {@code IdempotentCloser} with the given initial state.
+     *
+     * @param flag Initial state of closer
+     */
+    public IdempotentCloser(boolean flag) {
+        this.flag = new AtomicBoolean(flag);
+    }
+
+    public void maybeThrowIllegalStateException(Supplier<String> message) {
+        System.out.println("maybeThrowIllegalStateException - flag: " + flag + ", message: " + message.get());
+
+        if (flag.get())
+            throw new IllegalStateException(message.get());
+    }
 
     public void maybeThrowIllegalStateException(String message) {
-        if (isClosed())
+        System.out.println("maybeThrowIllegalStateException - flag: " + flag + ", message: " + message);
+
+        if (flag.get())
             throw new IllegalStateException(message);
     }
 
@@ -39,17 +107,24 @@ public class IdempotentCloser implements AutoCloseable {
         close(null, null);
     }
 
-    public void close(final Runnable onClose) {
-        close(onClose, null);
+    public void close(final Runnable onInitialClose) {
+        close(onInitialClose, null);
     }
 
-    public void close(final Runnable onClose, final Runnable onPreviousClose) {
+    public void close(final Runnable onInitialClose, final Runnable onSubsequentClose) {
         if (flag.compareAndSet(false, true)) {
-            if (onClose != null)
-                onClose.run();
+            if (onInitialClose != null)
+                onInitialClose.run();
         } else {
-            if (onPreviousClose != null)
-                onPreviousClose.run();
+            if (onSubsequentClose != null)
+                onSubsequentClose.run();
         }
+    }
+
+    @Override
+    public String toString() {
+        return "IdempotentCloser{" +
+                "flag=" + flag +
+                '}';
     }
 }
