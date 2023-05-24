@@ -178,7 +178,7 @@ public class IdempotentCloserTest {
 
         try (IdempotentCloser ic = new IdempotentCloser() {
             /**
-             * This provides us with the ability to track that the default {@link AutoCloseable#close()} methods
+             * This provides us with the ability to track that the default {@link AutoCloseable#close()} method
              * is called when the variable goes out of scope of the try-with-resources block.
              */
             @Override
