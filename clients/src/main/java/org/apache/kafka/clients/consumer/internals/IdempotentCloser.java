@@ -85,15 +85,11 @@ public class IdempotentCloser implements AutoCloseable {
     }
 
     public void maybeThrowIllegalStateException(Supplier<String> message) {
-        System.out.println("maybeThrowIllegalStateException - flag: " + flag + ", message: " + message.get());
-
         if (flag.get())
             throw new IllegalStateException(message.get());
     }
 
     public void maybeThrowIllegalStateException(String message) {
-        System.out.println("maybeThrowIllegalStateException - flag: " + flag + ", message: " + message);
-
         if (flag.get())
             throw new IllegalStateException(message);
     }
