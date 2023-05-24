@@ -19,7 +19,6 @@ package org.apache.kafka.clients.consumer.internals;
 import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.Metadata;
 import org.apache.kafka.clients.StaleMetadataException;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.internals.OffsetFetcherUtils.ListOffsetData;
 import org.apache.kafka.clients.consumer.internals.OffsetFetcherUtils.ListOffsetResult;
 import org.apache.kafka.common.ClusterResource;
@@ -39,7 +38,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -66,29 +64,28 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
     private final Logger log;
     private final OffsetFetcherUtils offsetFetcherUtils;
 
-    private final List<ListOffsetsRequestState> requestsToRetry = Collections.synchronizedList(new ArrayList<>());
-    private final List<NetworkClientDelegate.UnsentRequest> pendingRequests =
-            Collections.synchronizedList(new ArrayList<>());
+    private final Set<ListOffsetsRequestState> requestsToRetry;
+    private final List<NetworkClientDelegate.UnsentRequest> requestsToSend;
 
     public ListOffsetsRequestManager(final SubscriptionState subscriptionState,
                                      final ConsumerMetadata metadata,
-                                     final ConsumerConfig config,
+                                     final IsolationLevel isolationLevel,
                                      final Time time,
                                      final ApiVersions apiVersions,
                                      final LogContext logContext) {
         requireNonNull(subscriptionState);
         requireNonNull(metadata);
-        requireNonNull(config);
+        requireNonNull(isolationLevel);
         requireNonNull(time);
         requireNonNull(apiVersions);
         requireNonNull(logContext);
 
         this.metadata = metadata;
         this.metadata.addClusterUpdateListener(this);
-        String isolationLevelStr = config.getString(ConsumerConfig.ISOLATION_LEVEL_CONFIG);
-        this.isolationLevel = IsolationLevel.valueOf(((isolationLevelStr == null) ?
-                ConsumerConfig.DEFAULT_ISOLATION_LEVEL : isolationLevelStr).toUpperCase(Locale.ROOT));
+        this.isolationLevel = isolationLevel;
         this.log = logContext.logger(getClass());
+        this.requestsToRetry = new HashSet<>();
+        this.requestsToSend = new ArrayList<>();
         this.offsetFetcherUtils = new OffsetFetcherUtils(logContext, metadata, subscriptionState,
                 time, apiVersions);
 
@@ -101,27 +98,22 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
      */
     @Override
     public NetworkClientDelegate.PollResult poll(final long currentTimeMs) {
-        List<NetworkClientDelegate.UnsentRequest> requestsToSend;
-        synchronized (pendingRequests) {
-            requestsToSend = new ArrayList<>(pendingRequests);
-            pendingRequests.clear();
-        }
         if (requestsToSend.isEmpty()) {
             return new NetworkClientDelegate.PollResult(Long.MAX_VALUE, Collections.emptyList());
         }
 
-        return new NetworkClientDelegate.PollResult(Long.MAX_VALUE,
-                Collections.unmodifiableList(requestsToSend));
+        NetworkClientDelegate.PollResult pollResult =
+                new NetworkClientDelegate.PollResult(Long.MAX_VALUE, new ArrayList<>(requestsToSend));
+        this.requestsToSend.clear();
+
+        return pollResult;
     }
 
     /**
-     * Retrieve offsets for the given partitions and timestamp. This will build multiple requests (one for each
-     * node that is leader of some of the partitions involved), add them to the list of
-     * `pendingRequests` ready to be sent on the next call to {@link #poll(long)} and compute an
-     * aggregated result.
+     * Retrieve offsets for the given partitions and timestamp.
      *
      * @param partitions        Partitions to get offsets for
-     * @param timestamp         Target time
+     * @param timestamp         Target time to look offsets for
      * @param requireTimestamps True if this should fail with an UnsupportedVersionException if
      *                          the broker does not support fetching precise timestamps for offsets
      * @return Future containing the map of offsets retrieved for each partition. The future will
@@ -129,18 +121,19 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
      * to {@link #poll(long)}
      */
     public CompletableFuture<Map<TopicPartition, Long>> fetchOffsets(final Set<TopicPartition> partitions,
-                                                                     long timestamp,
-                                                                     boolean requireTimestamps) {
-        if (partitions.isEmpty()) {
-            return CompletableFuture.completedFuture(Collections.emptyMap());
-        }
+                                                                     final long timestamp,
+                                                                     final boolean requireTimestamps) {
         metadata.addTransientTopics(offsetFetcherUtils.topicsForPartitions(partitions));
 
         Map<TopicPartition, Long> timestampsToSearch = partitions.stream()
                 .collect(Collectors.toMap(Function.identity(), tp -> timestamp));
-        ListOffsetsRequestState requestState = new ListOffsetsRequestState(timestampsToSearch,
-                requireTimestamps, offsetFetcherUtils, isolationLevel);
-        requestState.globalResult.whenComplete((result, error) -> metadata.clearTransientTopics());
+        ListOffsetsRequestState requestState = new ListOffsetsRequestState(requireTimestamps,
+                offsetFetcherUtils, isolationLevel);
+        requestState.globalResult.whenComplete((result, error) -> {
+            metadata.clearTransientTopics();
+            log.debug("Fetch offsets completed for partitions {} and timestamp {}. Result {}, " +
+                    "error", partitions, timestamp, result, error);
+        });
 
         fetchOffsetsByTimes(timestampsToSearch, requireTimestamps, requestState);
 
@@ -151,31 +144,29 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
      * Generate requests for partitions with known leaders. Update the requestState by adding
      * partitions with unknown leader to the requestState.remainingToSearch
      */
-    private void fetchOffsetsByTimes(Map<TopicPartition, Long> timestampsToSearch,
-                                     boolean requireTimestamps,
-                                     ListOffsetsRequestState requestState) {
-
-        Map<TopicPartition, Long> remainingToSearch = new HashMap<>(timestampsToSearch);
-
-        List<NetworkClientDelegate.UnsentRequest> unsentRequests =
-                sendListOffsetsRequests(remainingToSearch, requireTimestamps, requestState);
-
-        if (!requestState.remainingToSearch.isEmpty()) {
+    private void fetchOffsetsByTimes(final Map<TopicPartition, Long> timestampsToSearch,
+                                     final boolean requireTimestamps,
+                                     final ListOffsetsRequestState requestState) {
+        try {
+            List<NetworkClientDelegate.UnsentRequest> unsentRequests =
+                    sendListOffsetsRequests(timestampsToSearch, requireTimestamps, requestState);
+            requestsToSend.addAll(unsentRequests);
+        } catch (StaleMetadataException e) {
             requestsToRetry.add(requestState);
         }
-        pendingRequests.addAll(unsentRequests);
     }
 
     @Override
     public void onUpdate(ClusterResource clusterResource) {
-        // Cluster metadata has been updated. Retry any request that is waiting to be built or retried.
-        List<ListOffsetsRequestState> requestsToProcess;
-        synchronized (requestsToRetry) {
-            requestsToProcess = new ArrayList<>(requestsToRetry);
-            requestsToRetry.clear();
-        }
-        requestsToProcess.forEach(requestState -> fetchOffsetsByTimes(requestState.remainingToSearch, requestState.requireTimestamps,
+        // Retry requests that were awaiting a metadata update. Process a copy of the list to
+        // avoid errors, given that the list of requestsToRetry may be modified from the
+        // fetchOffsetsByTimes call if any of the requests being retried fails
+        List<ListOffsetsRequestState> requestsToProcess = new ArrayList<>(requestsToRetry);
+        requestsToRetry.clear();
+        requestsToProcess.forEach(requestState -> fetchOffsetsByTimes(requestState.remainingToSearch,
+                requestState.requireTimestamps,
                 requestState));
+
     }
 
     /**
@@ -192,14 +183,15 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
             final Map<TopicPartition, Long> timestampsToSearch,
             final boolean requireTimestamps,
             final ListOffsetsRequestState requestState) {
-        final List<NetworkClientDelegate.UnsentRequest> unsentRequests = new ArrayList<>();
         Map<Node, Map<TopicPartition, ListOffsetsRequestData.ListOffsetsPartition>> timestampsToSearchByNode =
                 groupListOffsetRequests(timestampsToSearch, requestState);
         if (timestampsToSearchByNode.isEmpty()) {
             throw new StaleMetadataException();
         }
+
+        final List<NetworkClientDelegate.UnsentRequest> unsentRequests = new ArrayList<>();
         MultiNodeRequest multiNodeRequest = new MultiNodeRequest(timestampsToSearchByNode.size());
-        requestState.addMultiNodeRequest(multiNodeRequest);
+        addMultiNodeRequest(requestState, multiNodeRequest);
 
         for (Map.Entry<Node, Map<TopicPartition, ListOffsetsRequestData.ListOffsetsPartition>> entry : timestampsToSearchByNode.entrySet()) {
             Node node = entry.getKey();
@@ -230,6 +222,30 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
         return unsentRequests;
     }
 
+    private void addMultiNodeRequest(ListOffsetsRequestState requestState,
+                                     MultiNodeRequest multiNodeRequest) {
+        multiNodeRequest.resultFuture.whenComplete((multiNodeResult, error) -> {
+            // Done sending request to a set of known leaders
+            if (error == null) {
+                requestState.fetchedOffsets.putAll(multiNodeResult.fetchedOffsets);
+                requestState.remainingToSearch.keySet().retainAll(multiNodeResult.partitionsToRetry);
+                offsetFetcherUtils.updateSubscriptionState(
+                        multiNodeResult.fetchedOffsets,
+                        isolationLevel);
+
+                if (requestState.remainingToSearch.size() == 0) {
+                    ListOffsetResult listOffsetResult =
+                            new ListOffsetResult(requestState.fetchedOffsets,
+                                    requestState.remainingToSearch.keySet());
+                    requestState.globalResult.complete(listOffsetResult.offsetAndMetadataMap());
+                }
+            } else {
+                requestsToRetry.add(requestState);
+                requestState.globalResult.completeExceptionally(error);
+            }
+        });
+    }
+
     private void onSendToNodeSuccess(final ListOffsetsResponse response,
                                      final MultiNodeRequest multiNodeRequest) {
         try {
@@ -252,60 +268,33 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
 
         private final Map<TopicPartition, ListOffsetData> fetchedOffsets;
         private final Map<TopicPartition, Long> remainingToSearch;
-        private final List<MultiNodeRequest> multiNodeRequests;
         private final CompletableFuture<Map<TopicPartition, Long>> globalResult;
         final boolean requireTimestamps;
         final OffsetFetcherUtils offsetFetcherUtils;
         final IsolationLevel isolationLevel;
 
-        private ListOffsetsRequestState(Map<TopicPartition, Long> timestampsToSearch,
-                                        boolean requireTimestamps,
+        private ListOffsetsRequestState(boolean requireTimestamps,
                                         OffsetFetcherUtils offsetFetcherUtils,
                                         IsolationLevel isolationLevel) {
-            remainingToSearch = Collections.synchronizedMap(timestampsToSearch);
-            fetchedOffsets = Collections.synchronizedMap(new HashMap<>());
-            multiNodeRequests = Collections.synchronizedList(new ArrayList<>());
+            remainingToSearch = new HashMap<>();
+            fetchedOffsets = new HashMap<>();
             globalResult = new CompletableFuture<>();
+
             this.requireTimestamps = requireTimestamps;
             this.offsetFetcherUtils = offsetFetcherUtils;
             this.isolationLevel = isolationLevel;
         }
-
-        void addMultiNodeRequest(MultiNodeRequest multiNodeRequest) {
-            multiNodeRequest.resultFuture.whenComplete((multiNodeResult, error) -> {
-                // Done sending request to a set of known leaders
-                multiNodeRequests.remove(multiNodeRequest);
-                if (error == null) {
-                    fetchedOffsets.putAll(multiNodeResult.fetchedOffsets);
-                    remainingToSearch.keySet().retainAll(multiNodeResult.partitionsToRetry);
-                    offsetFetcherUtils.updateSubscriptionState(
-                            multiNodeResult.fetchedOffsets,
-                            isolationLevel);
-
-                    if (remainingToSearch.size() == 0) {
-                        ListOffsetResult listOffsetResult = new ListOffsetResult(fetchedOffsets,
-                                remainingToSearch.keySet());
-                        globalResult.complete(listOffsetResult.offsetAndMetadataMap());
-                    }
-                } else {
-                    // TODO: check if retriable errors should be considered/retried here
-                    globalResult.completeExceptionally(error);
-                }
-            });
-
-            multiNodeRequests.add(multiNodeRequest);
-        }
     }
 
     private static class MultiNodeRequest {
-        private final Map<TopicPartition, ListOffsetData> fetchedTimestampOffsets;
-        private final Set<TopicPartition> partitionsToRetry;
-        private final AtomicInteger expectedResponses;
-        private final CompletableFuture<ListOffsetResult> resultFuture;
+        final Map<TopicPartition, ListOffsetData> fetchedTimestampOffsets;
+        final Set<TopicPartition> partitionsToRetry;
+        final AtomicInteger expectedResponses;
+        final CompletableFuture<ListOffsetResult> resultFuture;
 
         private MultiNodeRequest(int nodeCount) {
-            fetchedTimestampOffsets = Collections.synchronizedMap(new HashMap<>());
-            partitionsToRetry = Collections.synchronizedSet(new HashSet<>());
+            fetchedTimestampOffsets = new HashMap<>();
+            partitionsToRetry = new HashSet<>();
             expectedResponses = new AtomicInteger(nodeCount);
             resultFuture = new CompletableFuture<>();
         }
@@ -322,7 +311,7 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
      *                           metadata update)
      */
     private Map<Node, Map<TopicPartition, ListOffsetsRequestData.ListOffsetsPartition>> groupListOffsetRequests(
-            Map<TopicPartition, Long> timestampsToSearch,
+            final Map<TopicPartition, Long> timestampsToSearch,
             final ListOffsetsRequestState requestState) {
         final Map<TopicPartition, ListOffsetsRequestData.ListOffsetsPartition> partitionDataMap = new HashMap<>();
         for (Map.Entry<TopicPartition, Long> entry : timestampsToSearch.entrySet()) {
@@ -343,5 +332,15 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
             }
         }
         return offsetFetcherUtils.regroupPartitionMapByNode(partitionDataMap);
+    }
+
+    // Visible for testing
+    int requestsToRetry() {
+        return requestsToRetry.size();
+    }
+
+    // Visible for testing
+    int requestsToSend() {
+        return requestsToSend.size();
     }
 }

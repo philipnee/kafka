@@ -400,9 +400,12 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
     }
 
     private Map<TopicPartition, Long> beginningOrEndOffset(Collection<TopicPartition> partitions,
-                                                           Long timestamp,
+                                                           long timestamp,
                                                            Duration timeout) {
         requireNonNull(partitions, "Partitions cannot be null");
+        if (partitions.isEmpty()) {
+            return Collections.emptyMap();
+        }
         final ListOffsetsApplicationEvent listOffsetsEvent = new ListOffsetsApplicationEvent(
                 partitions.stream().collect(Collectors.toSet()),
                 timestamp,

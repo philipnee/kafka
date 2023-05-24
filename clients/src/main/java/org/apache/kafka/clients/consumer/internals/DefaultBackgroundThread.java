@@ -41,6 +41,7 @@ import java.util.concurrent.BlockingQueue;
 
 import static org.apache.kafka.clients.consumer.internals.Utils.CONSUMER_MAX_INFLIGHT_REQUESTS_PER_CONNECTION;
 import static org.apache.kafka.clients.consumer.internals.Utils.CONSUMER_METRIC_GROUP_PREFIX;
+import static org.apache.kafka.clients.consumer.internals.Utils.getConfiguredIsolationLevel;
 
 /**
  * Background thread runnable that consumes {@code ApplicationEvent} and
@@ -158,7 +159,7 @@ public class DefaultBackgroundThread extends KafkaThread {
                         new ListOffsetsRequestManager(
                                 subscriptionState,
                                 metadata,
-                                config,
+                                getConfiguredIsolationLevel(config),
                                 time,
                                 apiVersions,
                                 logContext);
