@@ -128,34 +128,74 @@ public class IdempotentCloserTest {
     }
 
     /**
-     * Tests that if the onClose callback is
+     * Tests that if the invoked onClose callback throws an exception, that:
+     *
+     * <ol>
+     *     <li>The exception does not prevent the {@link IdempotentCloser} from being updated to the closed state</li>
+     *     <li>The exception is bubbled up to the user</li>
+     * </ol>
      */
     @Test
     public void testErrorsInOnCloseCallbacksAreNotSwallowed() {
         IdempotentCloser ic = new IdempotentCloser();
+
+        // Verify initial invariants.
         assertFalse(ic.isClosed());
+
+        // Upon close, our onClose callback will throw an error. First ensure that it is thrown at the user.
         assertThrows(RuntimeException.class, () -> ic.close(CALLBACK_WITH_RUNTIME_EXCEPTION));
 
-        // Make sure we're still closed, though...
+        // Make sure the IdempotentCloser is still closed, though.
         assertTrue(ic.isClosed());
     }
 
+    /**
+     * Tests that if the invoked onSubsequentClose callback throws an exception, that it is thrown from
+     * {@link IdempotentCloser#close(Runnable, Runnable)} so the user can handle it.
+     */
     @Test
     public void testErrorsInOnPreviousCloseCallbacksAreNotSwallowed() {
         IdempotentCloser ic = new IdempotentCloser();
+
+        // Verify initial invariants.
         assertFalse(ic.isClosed());
+
+        // Perform the initial close. No errors here.
         ic.close(CALLBACK_NO_OP);
+        assertTrue(ic.isClosed());
+
+        // Perform the subsequent close and verify that the exception is bubbled up to the user.
         assertThrows(RuntimeException.class, () -> ic.close(CALLBACK_NO_OP, CALLBACK_WITH_RUNTIME_EXCEPTION));
         assertTrue(ic.isClosed());
     }
 
+    /**
+     * Tests that the {@link IdempotentCloser} implementation of {@link AutoCloseable#close()} works as expected.
+     */
     @Test
     public void testAutoCloseable() {
-        try (IdempotentCloser ic = new IdempotentCloser()) {
+        AtomicInteger onCloseCounter = new AtomicInteger();
+
+        try (IdempotentCloser ic = new IdempotentCloser() {
+            /**
+             * This provides us with the ability to track that the default {@link AutoCloseable#close()} methods
+             * is called when the variable goes out of scope of the try-with-resources block.
+             */
+            @Override
+            public void close() {
+                close(onCloseCounter::getAndIncrement);
+            }
+        }) {
             assertFalse(ic.isClosed());
         }
+
+        assertEquals(1, onCloseCounter.get());
     }
 
+    /**
+     * Tests that if the {@link IdempotentCloser} is created with its initial state as closed, the various APIs
+     * will behave as expected.
+     */
     @Test
     public void testCreatedClosed() {
         IdempotentCloser ic = new IdempotentCloser(true);
