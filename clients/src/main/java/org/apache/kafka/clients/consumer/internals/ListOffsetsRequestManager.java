@@ -199,7 +199,7 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
                     .forConsumer(requireTimestamps, isolationLevel, false)
                     .setTargetTimes(ListOffsetsRequest.toListOffsetsTopics(entry.getValue()));
 
-            log.debug("Sending ListOffsetRequest {} to broker {}", builder, node);
+            log.debug("Creating ListOffsetRequest {} for broker {}", builder, node);
 
             NetworkClientDelegate.UnsentRequest unsentRequest = new NetworkClientDelegate.UnsentRequest(
                     builder,
