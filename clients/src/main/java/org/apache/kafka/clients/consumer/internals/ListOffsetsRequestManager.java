@@ -127,32 +127,32 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
 
         Map<TopicPartition, Long> timestampsToSearch = partitions.stream()
                 .collect(Collectors.toMap(Function.identity(), tp -> timestamp));
-        ListOffsetsRequestState requestState = new ListOffsetsRequestState(requireTimestamps,
+        ListOffsetsRequestState listOffsetsRequestState = new ListOffsetsRequestState(requireTimestamps,
                 offsetFetcherUtils, isolationLevel);
-        requestState.globalResult.whenComplete((result, error) -> {
+        listOffsetsRequestState.globalResult.whenComplete((result, error) -> {
             metadata.clearTransientTopics();
             log.debug("Fetch offsets completed for partitions {} and timestamp {}. Result {}, " +
                     "error", partitions, timestamp, result, error);
         });
 
-        fetchOffsetsByTimes(timestampsToSearch, requireTimestamps, requestState);
+        fetchOffsetsByTimes(timestampsToSearch, requireTimestamps, listOffsetsRequestState);
 
-        return requestState.globalResult;
+        return listOffsetsRequestState.globalResult;
     }
 
     /**
-     * Generate requests for partitions with known leaders. Update the requestState by adding
-     * partitions with unknown leader to the requestState.remainingToSearch
+     * Generate requests for partitions with known leaders. Update the listOffsetsRequestState by adding
+     * partitions with unknown leader to the listOffsetsRequestState.remainingToSearch
      */
     private void fetchOffsetsByTimes(final Map<TopicPartition, Long> timestampsToSearch,
                                      final boolean requireTimestamps,
-                                     final ListOffsetsRequestState requestState) {
+                                     final ListOffsetsRequestState listOffsetsRequestState) {
         try {
             List<NetworkClientDelegate.UnsentRequest> unsentRequests =
-                    sendListOffsetsRequests(timestampsToSearch, requireTimestamps, requestState);
+                    sendListOffsetsRequests(timestampsToSearch, requireTimestamps, listOffsetsRequestState);
             requestsToSend.addAll(unsentRequests);
         } catch (StaleMetadataException e) {
-            requestsToRetry.add(requestState);
+            requestsToRetry.add(listOffsetsRequestState);
         }
     }
 
@@ -182,16 +182,16 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
     private List<NetworkClientDelegate.UnsentRequest> sendListOffsetsRequests(
             final Map<TopicPartition, Long> timestampsToSearch,
             final boolean requireTimestamps,
-            final ListOffsetsRequestState requestState) {
+            final ListOffsetsRequestState listOffsetsRequestState) {
         Map<Node, Map<TopicPartition, ListOffsetsRequestData.ListOffsetsPartition>> timestampsToSearchByNode =
-                groupListOffsetRequests(timestampsToSearch, requestState);
+                groupListOffsetRequests(timestampsToSearch, listOffsetsRequestState);
         if (timestampsToSearchByNode.isEmpty()) {
             throw new StaleMetadataException();
         }
 
         final List<NetworkClientDelegate.UnsentRequest> unsentRequests = new ArrayList<>();
         MultiNodeRequest multiNodeRequest = new MultiNodeRequest(timestampsToSearchByNode.size());
-        addMultiNodeRequest(requestState, multiNodeRequest);
+        addMultiNodeRequest(listOffsetsRequestState, multiNodeRequest);
 
         for (Map.Entry<Node, Map<TopicPartition, ListOffsetsRequestData.ListOffsetsPartition>> entry : timestampsToSearchByNode.entrySet()) {
             Node node = entry.getKey();
@@ -222,26 +222,26 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
         return unsentRequests;
     }
 
-    private void addMultiNodeRequest(ListOffsetsRequestState requestState,
+    private void addMultiNodeRequest(ListOffsetsRequestState listOffsetsRequestState,
                                      MultiNodeRequest multiNodeRequest) {
         multiNodeRequest.resultFuture.whenComplete((multiNodeResult, error) -> {
             // Done sending request to a set of known leaders
             if (error == null) {
-                requestState.fetchedOffsets.putAll(multiNodeResult.fetchedOffsets);
-                requestState.remainingToSearch.keySet().retainAll(multiNodeResult.partitionsToRetry);
+                listOffsetsRequestState.fetchedOffsets.putAll(multiNodeResult.fetchedOffsets);
+                listOffsetsRequestState.remainingToSearch.keySet().retainAll(multiNodeResult.partitionsToRetry);
                 offsetFetcherUtils.updateSubscriptionState(
                         multiNodeResult.fetchedOffsets,
                         isolationLevel);
 
-                if (requestState.remainingToSearch.size() == 0) {
+                if (listOffsetsRequestState.remainingToSearch.size() == 0) {
                     ListOffsetResult listOffsetResult =
-                            new ListOffsetResult(requestState.fetchedOffsets,
-                                    requestState.remainingToSearch.keySet());
-                    requestState.globalResult.complete(listOffsetResult.offsetAndMetadataMap());
+                            new ListOffsetResult(listOffsetsRequestState.fetchedOffsets,
+                                    listOffsetsRequestState.remainingToSearch.keySet());
+                    listOffsetsRequestState.globalResult.complete(listOffsetResult.offsetAndMetadataMap());
                 }
             } else {
-                requestsToRetry.add(requestState);
-                requestState.globalResult.completeExceptionally(error);
+                requestsToRetry.add(listOffsetsRequestState);
+                listOffsetsRequestState.globalResult.completeExceptionally(error);
             }
         });
     }
@@ -302,17 +302,17 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
 
     /**
      * Group partitions by leader. Topic partitions from `timestampsToSearch` for which
-     * the leader is not known are kept as `remainingToSearch` in the `requestState`
+     * the leader is not known are kept as `remainingToSearch` in the `listOffsetsRequestState`
      *
-     * @param timestampsToSearch The mapping from partitions to the target timestamps
-     * @param requestState       Request state that will be extended by adding to its
-     *                           `remainingToSearch` map all partitions for which the
-     *                           request cannot be performed due to unknown leader (need
-     *                           metadata update)
+     * @param timestampsToSearch      The mapping from partitions to the target timestamps
+     * @param listOffsetsRequestState Request state that will be extended by adding to its
+     *                                `remainingToSearch` map all partitions for which the
+     *                                request cannot be performed due to unknown leader (need
+     *                                metadata update)
      */
     private Map<Node, Map<TopicPartition, ListOffsetsRequestData.ListOffsetsPartition>> groupListOffsetRequests(
             final Map<TopicPartition, Long> timestampsToSearch,
-            final ListOffsetsRequestState requestState) {
+            final ListOffsetsRequestState listOffsetsRequestState) {
         final Map<TopicPartition, ListOffsetsRequestData.ListOffsetsPartition> partitionDataMap = new HashMap<>();
         for (Map.Entry<TopicPartition, Long> entry : timestampsToSearch.entrySet()) {
             TopicPartition tp = entry.getKey();
@@ -322,7 +322,7 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
             if (!leaderAndEpoch.leader.isPresent()) {
                 log.debug("Leader for partition {} is unknown for fetching offset {}", tp, offset);
                 metadata.requestUpdate();
-                requestState.remainingToSearch.put(tp, offset);
+                listOffsetsRequestState.remainingToSearch.put(tp, offset);
             } else {
                 int currentLeaderEpoch = leaderAndEpoch.epoch.orElse(ListOffsetsResponse.UNKNOWN_EPOCH);
                 partitionDataMap.put(tp, new ListOffsetsRequestData.ListOffsetsPartition()
