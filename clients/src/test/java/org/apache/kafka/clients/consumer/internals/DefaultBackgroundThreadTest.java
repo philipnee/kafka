@@ -188,9 +188,9 @@ public class DefaultBackgroundThreadTest {
 
     private RequestManagers mockRequestManagers() {
         return new RequestManagers(
+                listOffsetsRequestManager,
                 Optional.of(coordinatorManager),
-                Optional.of(commitManager),
-                Optional.of(listOffsetsRequestManager));
+                Optional.of(commitManager));
     }
 
     private static NetworkClientDelegate.UnsentRequest findCoordinatorUnsentRequest(
