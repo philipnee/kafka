@@ -43,6 +43,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -127,8 +128,11 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
 
         Map<TopicPartition, Long> timestampsToSearch = partitions.stream()
                 .collect(Collectors.toMap(Function.identity(), tp -> timestamp));
-        ListOffsetsRequestState listOffsetsRequestState = new ListOffsetsRequestState(requireTimestamps,
-                offsetFetcherUtils, isolationLevel);
+        ListOffsetsRequestState listOffsetsRequestState = new ListOffsetsRequestState(
+                timestampsToSearch,
+                requireTimestamps,
+                offsetFetcherUtils,
+                isolationLevel);
         listOffsetsRequestState.globalResult.whenComplete((result, error) -> {
             metadata.clearTransientTopics();
             log.debug("Fetch offsets completed for partitions {} and timestamp {}. Result {}, " +
@@ -163,10 +167,12 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
         // fetchOffsetsByTimes call if any of the requests being retried fails
         List<ListOffsetsRequestState> requestsToProcess = new ArrayList<>(requestsToRetry);
         requestsToRetry.clear();
-        requestsToProcess.forEach(requestState -> fetchOffsetsByTimes(requestState.remainingToSearch,
-                requestState.requireTimestamps,
-                requestState));
-
+        requestsToProcess.forEach(requestState -> {
+            Map<TopicPartition, Long> timestampsToSearch =
+                    new HashMap<>(requestState.remainingToSearch);
+            requestState.remainingToSearch.clear();
+            fetchOffsetsByTimes(timestampsToSearch, requestState.requireTimestamps, requestState);
+        });
     }
 
     /**
@@ -191,7 +197,27 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
 
         final List<NetworkClientDelegate.UnsentRequest> unsentRequests = new ArrayList<>();
         MultiNodeRequest multiNodeRequest = new MultiNodeRequest(timestampsToSearchByNode.size());
-        addMultiNodeRequest(listOffsetsRequestState, multiNodeRequest);
+        multiNodeRequest.onComplete((multiNodeResult, error) -> {
+            // Done sending request to a set of known leaders
+            if (error == null) {
+                listOffsetsRequestState.fetchedOffsets.putAll(multiNodeResult.fetchedOffsets);
+                listOffsetsRequestState.addPartitionsToRetry(multiNodeResult.partitionsToRetry);
+                offsetFetcherUtils.updateSubscriptionState(multiNodeResult.fetchedOffsets,
+                        isolationLevel);
+
+                if (listOffsetsRequestState.remainingToSearch.size() == 0) {
+                    ListOffsetResult listOffsetResult =
+                            new ListOffsetResult(listOffsetsRequestState.fetchedOffsets,
+                                    listOffsetsRequestState.remainingToSearch.keySet());
+                    listOffsetsRequestState.globalResult.complete(listOffsetResult.offsetAndMetadataMap());
+                } else {
+                    requestsToRetry.add(listOffsetsRequestState);
+                }
+            } else {
+                log.debug("List offsets request failed with error", error);
+                listOffsetsRequestState.globalResult.completeExceptionally(error);
+            }
+        });
 
         for (Map.Entry<Node, Map<TopicPartition, ListOffsetsRequestData.ListOffsetsPartition>> entry : timestampsToSearchByNode.entrySet()) {
             Node node = entry.getKey();
@@ -222,30 +248,6 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
         return unsentRequests;
     }
 
-    private void addMultiNodeRequest(ListOffsetsRequestState listOffsetsRequestState,
-                                     MultiNodeRequest multiNodeRequest) {
-        multiNodeRequest.resultFuture.whenComplete((multiNodeResult, error) -> {
-            // Done sending request to a set of known leaders
-            if (error == null) {
-                listOffsetsRequestState.fetchedOffsets.putAll(multiNodeResult.fetchedOffsets);
-                listOffsetsRequestState.remainingToSearch.keySet().retainAll(multiNodeResult.partitionsToRetry);
-                offsetFetcherUtils.updateSubscriptionState(
-                        multiNodeResult.fetchedOffsets,
-                        isolationLevel);
-
-                if (listOffsetsRequestState.remainingToSearch.size() == 0) {
-                    ListOffsetResult listOffsetResult =
-                            new ListOffsetResult(listOffsetsRequestState.fetchedOffsets,
-                                    listOffsetsRequestState.remainingToSearch.keySet());
-                    listOffsetsRequestState.globalResult.complete(listOffsetResult.offsetAndMetadataMap());
-                }
-            } else {
-                requestsToRetry.add(listOffsetsRequestState);
-                listOffsetsRequestState.globalResult.completeExceptionally(error);
-            }
-        });
-    }
-
     private void onSendToNodeSuccess(final ListOffsetsResponse response,
                                      final MultiNodeRequest multiNodeRequest) {
         try {
@@ -266,6 +268,7 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
 
     private static class ListOffsetsRequestState {
 
+        private final Map<TopicPartition, Long> timestampsToSearch;
         private final Map<TopicPartition, ListOffsetData> fetchedOffsets;
         private final Map<TopicPartition, Long> remainingToSearch;
         private final CompletableFuture<Map<TopicPartition, Long>> globalResult;
@@ -273,16 +276,23 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
         final OffsetFetcherUtils offsetFetcherUtils;
         final IsolationLevel isolationLevel;
 
-        private ListOffsetsRequestState(boolean requireTimestamps,
+        private ListOffsetsRequestState(Map<TopicPartition, Long> timestampsToSearch,
+                                        boolean requireTimestamps,
                                         OffsetFetcherUtils offsetFetcherUtils,
                                         IsolationLevel isolationLevel) {
             remainingToSearch = new HashMap<>();
             fetchedOffsets = new HashMap<>();
             globalResult = new CompletableFuture<>();
 
+            this.timestampsToSearch = timestampsToSearch;
             this.requireTimestamps = requireTimestamps;
             this.offsetFetcherUtils = offsetFetcherUtils;
             this.isolationLevel = isolationLevel;
+        }
+
+        private void addPartitionsToRetry(Set<TopicPartition> partitionsToRetry) {
+            remainingToSearch.putAll(partitionsToRetry.stream()
+                    .collect(Collectors.toMap(tp -> tp, timestampsToSearch::get)));
         }
     }
 
@@ -297,6 +307,10 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
             partitionsToRetry = new HashSet<>();
             expectedResponses = new AtomicInteger(nodeCount);
             resultFuture = new CompletableFuture<>();
+        }
+
+        private void onComplete(BiConsumer<? super ListOffsetResult, ? super Throwable> action) {
+            resultFuture.whenComplete(action);
         }
     }
 
