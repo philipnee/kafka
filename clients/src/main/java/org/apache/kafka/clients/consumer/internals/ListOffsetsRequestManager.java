@@ -89,7 +89,6 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
         this.requestsToSend = new ArrayList<>();
         this.offsetFetcherUtils = new OffsetFetcherUtils(logContext, metadata, subscriptionState,
                 time, apiVersions);
-
     }
 
     /**
