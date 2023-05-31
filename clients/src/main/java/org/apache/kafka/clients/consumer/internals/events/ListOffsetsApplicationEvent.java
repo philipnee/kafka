@@ -26,7 +26,7 @@ import java.util.concurrent.CompletableFuture;
  * Event for retrieving partition offsets from the partition leader
  * by performing a {@link org.apache.kafka.common.requests.ListOffsetsRequest}
  */
-public class ListOffsetsApplicationEvent extends ApplicationEvent {
+public class ListOffsetsApplicationEvent extends CompletableApplicationEvent<Map<TopicPartition, Long>> {
     private final CompletableFuture<Map<TopicPartition, Long>> future;
 
     final Set<TopicPartition> partitions;
@@ -45,5 +45,13 @@ public class ListOffsetsApplicationEvent extends ApplicationEvent {
 
     public CompletableFuture<Map<TopicPartition, Long>> future() {
         return future;
+    }
+
+    @Override
+    public String toString() {
+        return "ListOffsetsApplicationEvent {" +
+                "partitions=" + partitions + ", " +
+                "target timestamp=" + timestamp + ", " +
+                "requireTimestamps=" + requireTimestamps + '}';
     }
 }

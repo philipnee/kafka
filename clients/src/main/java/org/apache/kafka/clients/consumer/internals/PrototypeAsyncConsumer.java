@@ -410,18 +410,7 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
                 partitions.stream().collect(Collectors.toSet()),
                 timestamp,
                 false);
-        eventHandler.add(listOffsetsEvent);
-        try {
-            return listOffsetsEvent.future().get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
-            throw new InterruptException(e);
-        } catch (TimeoutException e) {
-            throw new org.apache.kafka.common.errors.TimeoutException(e);
-        } catch (ExecutionException e) {
-            throw new KafkaException(e);
-        } catch (Exception e) {
-            throw e;
-        }
+        return eventHandler.addAndGet(listOffsetsEvent, timeout);
     }
 
     @Override
