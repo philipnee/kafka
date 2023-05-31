@@ -31,6 +31,7 @@ import org.apache.kafka.common.utils.BufferSupplier;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Timer;
+import org.apache.kafka.common.utils.Utils;
 import org.slf4j.Logger;
 import org.slf4j.helpers.MessageFormatter;
 
@@ -394,21 +395,24 @@ public abstract class AbstractFetch<K, V> implements Closeable {
         return reqs;
     }
 
+    // Visible for testing
     protected FetchSessionHandler sessionHandler(int node) {
         return sessionHandlers.get(node);
     }
-
-    // Visible for testing
 
     /**
      * This is guaranteed (by the {@link IdempotentCloser} to be executed only once the first time that
      * any of the {@link #close()} methods are called.
      * @param timer Timer to enforce time limit
      */
+    // Visible for testing
     protected abstract void closeInternal(Timer timer);
 
     public void close(final Timer timer) {
-        idempotentCloser.close(() -> closeInternal(timer));
+        idempotentCloser.close(() -> {
+            closeInternal(timer);
+            Utils.closeQuietly(fetchBuffer, "fetchBuffer");
+        });
     }
 
     @Override
