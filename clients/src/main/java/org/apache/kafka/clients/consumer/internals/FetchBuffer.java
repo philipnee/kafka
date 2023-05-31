@@ -53,11 +53,11 @@ public class FetchBuffer<K, V> implements Closeable {
     }
 
     /**
-     * Returns {@code true} of there are no completed fetches pending to return to the user.
+     * Returns {@code true} if there are no completed fetches pending to return to the user.
      *
      * @return {@code true} if the buffer is empty, {@code false} otherwise
      */
-    public boolean isEmpty() {
+    boolean isEmpty() {
         return completedFetches.isEmpty();
     }
 
@@ -67,31 +67,31 @@ public class FetchBuffer<K, V> implements Closeable {
      *
      * @return {@code true} if there are completed fetches that match the {@link Predicate}, {@code false} otherwise
      */
-    public boolean hasCompletedFetches(Predicate<CompletedFetch<K, V>> predicate) {
+    boolean hasCompletedFetches(Predicate<CompletedFetch<K, V>> predicate) {
         return completedFetches.stream().anyMatch(predicate);
     }
 
-    public void add(CompletedFetch<K, V> completedFetch) {
+    void add(CompletedFetch<K, V> completedFetch) {
         completedFetches.add(completedFetch);
     }
 
-    public void addAll(Collection<CompletedFetch<K, V>> completedFetches) {
+    void addAll(Collection<CompletedFetch<K, V>> completedFetches) {
         this.completedFetches.addAll(completedFetches);
     }
 
-    public CompletedFetch<K, V> nextInLineFetch() {
+    CompletedFetch<K, V> nextInLineFetch() {
         return nextInLineFetch;
     }
 
-    public void setNextInLineFetch(CompletedFetch<K, V> completedFetch) {
+    void setNextInLineFetch(CompletedFetch<K, V> completedFetch) {
         this.nextInLineFetch = completedFetch;
     }
 
-    public CompletedFetch<K, V> peek() {
+    CompletedFetch<K, V> peek() {
         return completedFetches.peek();
     }
 
-    public CompletedFetch<K, V> poll() {
+    CompletedFetch<K, V> poll() {
         return completedFetches.poll();
     }
 
@@ -101,7 +101,7 @@ public class FetchBuffer<K, V> implements Closeable {
      *
      * @param partitions {@link Set} of {@link TopicPartition}s for which any buffered data should be kept
      */
-    public void retainAll(final Set<TopicPartition> partitions) {
+    void retainAll(final Set<TopicPartition> partitions) {
         final Iterator<CompletedFetch<K, V>> completedFetchesItr = completedFetches.iterator();
 
         while (completedFetchesItr.hasNext()) {
@@ -121,7 +121,7 @@ public class FetchBuffer<K, V> implements Closeable {
         }
     }
 
-    public Set<TopicPartition> partitions() {
+    Set<TopicPartition> partitions() {
         Set<TopicPartition> partitions = new HashSet<>();
 
         if (nextInLineFetch != null && !nextInLineFetch.isConsumed()) {
