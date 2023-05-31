@@ -117,18 +117,6 @@ public class Fetcher<K, V> extends AbstractFetch<K, V> {
         return fetchCollector.collectFetch(fetchBuffer);
     }
 
-    public boolean hasCompletedFetches() {
-        return !fetchBuffer.isEmpty();
-    }
-
-    /**
-     * Return whether we have any completed fetches that are fetchable. This method is thread-safe.
-     * @return true if there are completed fetches that can be returned, false otherwise
-     */
-    public boolean hasAvailableFetches() {
-        return fetchBuffer.hasCompletedFetches(fetch -> subscriptions.isFetchable(fetch.partition));
-    }
-
     protected void maybeCloseFetchSessions(final Timer timer) {
         final List<RequestFuture<ClientResponse>> requestFutures = new ArrayList<>();
         Map<Node, FetchSessionHandler.FetchRequestData> fetchRequestMap = prepareCloseFetchSessionRequests();

@@ -88,6 +88,18 @@ public abstract class AbstractFetch<K, V> implements Closeable {
         this.time = time;
     }
 
+    boolean hasCompletedFetches() {
+        return !fetchBuffer.isEmpty();
+    }
+
+    /**
+     * Return whether we have any completed fetches that are fetchable. This method is thread-safe.
+     * @return true if there are completed fetches that can be returned, false otherwise
+     */
+    public boolean hasAvailableFetches() {
+        return fetchBuffer.hasCompletedFetches(fetch -> subscriptions.isFetchable(fetch.partition));
+    }
+
     /**
      * Implements the core logic for a successful fetch request/response.
      *

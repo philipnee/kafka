@@ -32,6 +32,10 @@ import java.util.function.Predicate;
  * {@code FetchBuffer} buffers up the results from the broker responses as they are received. It is essentially a
  * wrapper around a {@link java.util.Queue} of {@link CompletedFetch}.
  *
+ * <p/>
+ *
+ * <em>Note</em>: this class is not thread-safe and is intended to only be used from a single thread.
+ *
  * @param <K> Record key type
  * @param <V> Record value type
  */
