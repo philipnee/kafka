@@ -88,6 +88,12 @@ public abstract class AbstractFetch<K, V> implements Closeable {
         this.time = time;
     }
 
+    /**
+     * Return whether we have any completed fetches pending return to the user. This method is thread-safe. Has
+     * visibility for testing.
+     *
+     * @return true if there are completed fetches, false otherwise
+     */
     boolean hasCompletedFetches() {
         return !fetchBuffer.isEmpty();
     }
