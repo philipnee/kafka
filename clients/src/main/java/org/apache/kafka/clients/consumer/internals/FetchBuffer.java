@@ -23,7 +23,6 @@ import org.slf4j.Logger;
 import java.io.Closeable;
 import java.util.Collection;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Predicate;
@@ -102,36 +101,30 @@ public class FetchBuffer<K, V> implements Closeable {
      * @param partitions {@link Set} of {@link TopicPartition}s for which any buffered data should be kept
      */
     void retainAll(final Set<TopicPartition> partitions) {
-        final Iterator<CompletedFetch<K, V>> completedFetchesItr = completedFetches.iterator();
+        completedFetches.removeIf(cf -> maybeDrain(partitions, cf));
 
-        while (completedFetchesItr.hasNext()) {
-            final CompletedFetch<K, V> completedFetch = completedFetchesItr.next();
-
-            if (!partitions.contains(completedFetch.partition)) {
-                log.debug("Removing {} from buffered fetch data as it is not in the set of partitions to retain", completedFetch.partition);
-                completedFetch.drain();
-                completedFetchesItr.remove();
-            }
-        }
-
-        if (nextInLineFetch != null && !partitions.contains(nextInLineFetch.partition)) {
-            log.debug("Removing {} from buffered fetch data as it is not in the set of partitions to retain", nextInLineFetch.partition);
-            nextInLineFetch.drain();
+        if (maybeDrain(partitions, nextInLineFetch))
             nextInLineFetch = null;
+    }
+
+    boolean maybeDrain(final Set<TopicPartition> partitions, final CompletedFetch<K, V> completedFetch) {
+        if (completedFetch != null && !partitions.contains(completedFetch.partition)) {
+            log.debug("Removing {} from buffered fetch data as it is not in the set of partitions to retain ({})", completedFetch.partition, partitions);
+            completedFetch.drain();
+            return true;
+        } else {
+            return false;
         }
     }
 
     Set<TopicPartition> partitions() {
-        Set<TopicPartition> partitions = new HashSet<>();
+        final Set<TopicPartition> partitions = new HashSet<>();
 
         if (nextInLineFetch != null && !nextInLineFetch.isConsumed()) {
             partitions.add(nextInLineFetch.partition);
         }
 
-        for (CompletedFetch<K, V> completedFetch : completedFetches) {
-            partitions.add(completedFetch.partition);
-        }
-
+        completedFetches.forEach(cf -> partitions.add(cf.partition));
         return partitions;
     }
 
@@ -144,6 +137,9 @@ public class FetchBuffer<K, V> implements Closeable {
                 nextInLineFetch.drain();
                 nextInLineFetch = null;
             }
+
+            completedFetches.forEach(CompletedFetch::drain);
+            completedFetches.clear();
         }, () -> log.warn("The fetch buffer was previously closed"));
     }
 }
