@@ -97,7 +97,7 @@ public class FetchBuffer<K, V> implements Closeable {
 
     /**
      * Updates the buffer to retain only the fetch data that corresponds to the given partitions. Any previously
-     * {@link CompletedFetch fetched data} is its partition is not in the given set of partitions.
+     * {@link CompletedFetch fetched data} is removed if its partition is not in the given set of partitions.
      *
      * @param partitions {@link Set} of {@link TopicPartition}s for which any buffered data should be kept
      */
