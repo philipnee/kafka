@@ -156,7 +156,6 @@ public class DefaultBackgroundThread extends KafkaThread {
             CoordinatorRequestManager coordinatorRequestManager = null;
             CommitRequestManager commitRequestManager = null;
             TopicMetadataRequestManager topicMetadataRequestManger = new TopicMetadataRequestManager(
-                this.time,
                 logContext,
                 config);
 
@@ -173,9 +172,10 @@ public class DefaultBackgroundThread extends KafkaThread {
                         coordinatorRequestManager,
                         groupState);
                 this.requestManagers = new RequestManagers(
-                    Optional.of(coordinatorManager),
-                    Optional.of(commitRequestManager),
-                    topicMetadataRequestManger);
+                    offsetsRequestManager,
+                    topicMetadataRequestManger,
+                    Optional.of(coordinatorRequestManager),
+                    Optional.of(commitRequestManager));
             } else {
                 this.requestManagers = new RequestManagers(
                     offsetsRequestManager,

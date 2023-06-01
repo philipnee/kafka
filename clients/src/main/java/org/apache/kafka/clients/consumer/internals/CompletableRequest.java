@@ -18,6 +18,11 @@ package org.apache.kafka.clients.consumer.internals;
 
 import java.util.concurrent.CompletableFuture;
 
+/**
+ * A request that is completable by the user. This is used to wrap requests that are sent to the background thread
+ * for completion.
+ * @param <T> The type of the response.
+ */
 public class CompletableRequest<T> {
     private final CompletableFuture<T> future;
 

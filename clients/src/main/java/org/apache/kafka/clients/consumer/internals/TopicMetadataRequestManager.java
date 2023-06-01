@@ -27,7 +27,6 @@ import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.requests.MetadataRequest;
 import org.apache.kafka.common.requests.MetadataResponse;
 import org.apache.kafka.common.utils.LogContext;
-import org.apache.kafka.common.utils.Time;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
@@ -35,7 +34,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -62,15 +60,14 @@ import java.util.stream.Collectors;
 public class TopicMetadataRequestManager implements RequestManager {
     private final boolean allowAutoTopicCreation;
     private final Map<String, CompletableTopicMetadataRequest> inflightRequests;
-    private final Time time;
     private final long retryBackoffMs;
     private final Logger log;
+    private final LogContext logContext;
 
     public TopicMetadataRequestManager(
-        final Time time,
         final LogContext logContext,
         final ConsumerConfig config) {
-        this.time = time;
+        this.logContext = logContext;
         this.log = logContext.logger(this.getClass());
         this.inflightRequests = new HashMap<>();
         this.retryBackoffMs = config.getLong(ConsumerConfig.RETRY_BACKOFF_MS_CONFIG);
@@ -80,8 +77,9 @@ public class TopicMetadataRequestManager implements RequestManager {
     @Override
     public NetworkClientDelegate.PollResult poll(final long currentTimeMs) {
         List<NetworkClientDelegate.UnsentRequest> requests = inflightRequests.values().stream()
-            .map(req -> req.send(currentTimeMs).orElse(null))
-            .filter(Objects::nonNull)
+            .map(req -> req.send(currentTimeMs))
+            .filter(Optional::isPresent)
+            .map(Optional::get)
             .collect(Collectors.toList());
         return requests.isEmpty() ?
             new NetworkClientDelegate.PollResult(Long.MAX_VALUE, new ArrayList<>()) :
@@ -102,6 +100,7 @@ public class TopicMetadataRequestManager implements RequestManager {
         }
 
         CompletableTopicMetadataRequest newRequest = new CompletableTopicMetadataRequest(
+            logContext,
             topic,
             retryBackoffMs);
         inflightRequests.put(topicName, newRequest);
@@ -117,10 +116,11 @@ public class TopicMetadataRequestManager implements RequestManager {
         private final Optional<String> topic;
         private final RequestState state;
 
-        public CompletableTopicMetadataRequest(final Optional<String> topic,
+        public CompletableTopicMetadataRequest(final LogContext logContext,
+                                               final Optional<String> topic,
                                                final long retryBackoffMs) {
             this.topic = topic;
-            this.state = new RequestState(retryBackoffMs);
+            this.state = new RequestState(logContext, retryBackoffMs);
         }
 
         /**
