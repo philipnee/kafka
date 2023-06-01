@@ -16,7 +16,6 @@
  */
 package org.apache.kafka.clients.consumer.internals;
 
-import org.apache.kafka.clients.ClientResponse;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.consumer.RetriableCommitFailedException;
@@ -123,7 +122,7 @@ public class CommitRequestManager implements RequestManager {
      * Handles {@link org.apache.kafka.clients.consumer.internals.events.CommitApplicationEvent}. It creates an
      * {@link CompletableOffsetCommitRequest} and enqueue it to send later.
      */
-    public CompletableFuture<ClientResponse> addOffsetCommitRequest(final Map<TopicPartition, OffsetAndMetadata> offsets) {
+    public CompletableFuture<Void> addOffsetCommitRequest(final Map<TopicPartition, OffsetAndMetadata> offsets) {
         return pendingRequests.addOffsetCommitRequest(offsets);
     }
 
@@ -151,7 +150,7 @@ public class CommitRequestManager implements RequestManager {
     }
 
     // Visible for testing
-    CompletableFuture<ClientResponse> sendAutoCommit(final Map<TopicPartition, OffsetAndMetadata> allConsumedOffsets) {
+    CompletableFuture<Void> sendAutoCommit(final Map<TopicPartition, OffsetAndMetadata> allConsumedOffsets) {
         log.debug("Enqueuing autocommit offsets: {}", allConsumedOffsets);
         return this.addOffsetCommitRequest(allConsumedOffsets)
                 .whenComplete((response, throwable) -> {
@@ -171,7 +170,7 @@ public class CommitRequestManager implements RequestManager {
                 });
     }
 
-    private class CompletableOffsetCommitRequest extends CompletableRequest<ClientResponse> {
+    private class CompletableOffsetCommitRequest extends CompletableRequest<Void> {
         private final Map<TopicPartition, OffsetAndMetadata> offsets;
         private final String groupId;
         private final GroupState.Generation generation;
@@ -220,7 +219,7 @@ public class CommitRequestManager implements RequestManager {
                 coordinatorRequestManager.coordinator(),
                 (response, throwable) -> {
                     if (throwable == null) {
-                        this.future().complete(response);
+                        this.future().complete(null);
                     } else {
                         this.future().completeExceptionally(throwable);
                     }
@@ -379,7 +378,7 @@ public class CommitRequestManager implements RequestManager {
             return !unsentOffsetCommits.isEmpty() || !unsentOffsetFetches.isEmpty();
         }
 
-        CompletableFuture<ClientResponse> addOffsetCommitRequest(final Map<TopicPartition, OffsetAndMetadata> offsets) {
+        CompletableFuture<Void> addOffsetCommitRequest(final Map<TopicPartition, OffsetAndMetadata> offsets) {
             // TODO: Dedupe committing the same offsets to the same partitions
             CompletableOffsetCommitRequest request = new CompletableOffsetCommitRequest(
                     offsets,
