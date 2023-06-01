@@ -64,9 +64,7 @@ public class TopicMetadataRequestManager implements RequestManager {
     private final Logger log;
     private final LogContext logContext;
 
-    public TopicMetadataRequestManager(
-        final LogContext logContext,
-        final ConsumerConfig config) {
+    public TopicMetadataRequestManager(final LogContext logContext, final ConsumerConfig config) {
         this.logContext = logContext;
         this.log = logContext.logger(this.getClass());
         this.inflightRequests = new HashMap<>();
