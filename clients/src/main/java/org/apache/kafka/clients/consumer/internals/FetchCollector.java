@@ -102,7 +102,7 @@ public class FetchCollector<K, V> {
 
                     if (!records.isInitialized()) {
                         try {
-                            fetchBuffer.setNextInLineFetch(initializeCompletedFetch(records));
+                            fetchBuffer.setNextInLineFetch(initialize(records));
                         } catch (Exception e) {
                             // Remove a completedFetch upon a parse with exception if (1) it contains no records, and
                             // (2) there are no fetched records with actual content preceding this exception.
@@ -143,7 +143,7 @@ public class FetchCollector<K, V> {
         return fetch;
     }
 
-    private Fetch<K, V> fetchRecords(final CompletedFetch<K, V> nextInLineFetch) {
+    Fetch<K, V> fetchRecords(final CompletedFetch<K, V> nextInLineFetch) {
         final TopicPartition tp = nextInLineFetch.partition;
 
         if (!subscriptions.isAssigned(tp)) {
@@ -202,11 +202,10 @@ public class FetchCollector<K, V> {
         return Fetch.empty();
     }
 
-
     /**
      * Initialize a CompletedFetch object.
      */
-    private CompletedFetch<K, V> initializeCompletedFetch(final CompletedFetch<K, V> completedFetch) {
+    CompletedFetch<K, V> initialize(final CompletedFetch<K, V> completedFetch) {
         final TopicPartition tp = completedFetch.partition;
         final Errors error = Errors.forCode(completedFetch.partitionData.errorCode());
         boolean recordMetrics = true;
@@ -217,11 +216,11 @@ public class FetchCollector<K, V> {
                 log.debug("Ignoring fetched records for partition {} since it no longer has valid position", tp);
                 return null;
             } else if (error == Errors.NONE) {
-                final CompletedFetch<K, V> ret = handleInitializeCompletedFetchSuccess(subscriptions, completedFetch);
+                final CompletedFetch<K, V> ret = handleInitializeSuccess(completedFetch);
                 recordMetrics = ret == null;
                 return ret;
             } else {
-                handleInitializeCompletedFetchErrors(subscriptions, completedFetch, error);
+                handleInitializeErrors(completedFetch, error);
                 return null;
             }
         } finally {
@@ -236,8 +235,7 @@ public class FetchCollector<K, V> {
         }
     }
 
-    private CompletedFetch<K, V> handleInitializeCompletedFetchSuccess(final SubscriptionState subscriptions,
-                                                                       final CompletedFetch<K, V> completedFetch) {
+    CompletedFetch<K, V> handleInitializeSuccess(final CompletedFetch<K, V> completedFetch) {
         final TopicPartition tp = completedFetch.partition;
         final long fetchOffset = completedFetch.nextFetchOffset();
 
@@ -301,9 +299,7 @@ public class FetchCollector<K, V> {
         return completedFetch;
     }
 
-    private void handleInitializeCompletedFetchErrors(final SubscriptionState subscriptions,
-                                                      final CompletedFetch<K, V> completedFetch,
-                                                      final Errors error) {
+    void handleInitializeErrors(final CompletedFetch<K, V> completedFetch, final Errors error) {
         final TopicPartition tp = completedFetch.partition;
         final long fetchOffset = completedFetch.nextFetchOffset();
 
@@ -334,7 +330,16 @@ public class FetchCollector<K, V> {
                     log.debug("Discarding stale fetch response for partition {} since the fetched offset {} " +
                             "does not match the current offset {}", tp, fetchOffset, position);
                 } else {
-                    handleOffsetOutOfRange(subscriptions, position, tp);
+                    String errorMessage = "Fetch position " + position + " is out of range for partition " + tp;
+
+                    if (subscriptions.hasDefaultOffsetResetPolicy()) {
+                        log.info("{}, resetting offset", errorMessage);
+                        subscriptions.requestOffsetReset(tp);
+                    } else {
+                        log.info("{}, raising error to the application since no reset policy is configured", errorMessage);
+                        throw new OffsetOutOfRangeException(errorMessage,
+                                Collections.singletonMap(tp, position.offset));
+                    }
                 }
             } else {
                 log.debug("Unset the preferred read replica {} for partition {} since we got {} when fetching {}",
@@ -360,22 +365,6 @@ public class FetchCollector<K, V> {
                     + " while fetching at offset "
                     + fetchOffset
                     + " from topic-partition " + tp);
-        }
-    }
-
-
-    private void handleOffsetOutOfRange(final SubscriptionState subscriptions,
-                                        final SubscriptionState.FetchPosition fetchPosition,
-                                        final TopicPartition topicPartition) {
-        String errorMessage = "Fetch position " + fetchPosition + " is out of range for partition " + topicPartition;
-
-        if (subscriptions.hasDefaultOffsetResetPolicy()) {
-            log.info("{}, resetting offset", errorMessage);
-            subscriptions.requestOffsetReset(topicPartition);
-        } else {
-            log.info("{}, raising error to the application since no reset policy is configured", errorMessage);
-            throw new OffsetOutOfRangeException(errorMessage,
-                    Collections.singletonMap(topicPartition, fetchPosition.offset));
         }
     }
 }
