@@ -17,6 +17,7 @@
 package org.apache.kafka.clients.consumer.internals;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.internals.ClusterResourceListeners;
 import org.apache.kafka.common.message.FetchResponseData;
@@ -33,6 +34,8 @@ import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.common.utils.Time;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -48,6 +51,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -69,20 +73,9 @@ public class FetchCollectorTest {
 
     private FetchMetricsManager metricsManager;
 
+    private ConsumerMetadata metadata;
+
     private FetchCollector<String, String> fetchCollector;
-
-    @Test
-    public void testNoResultsIfInitializing() {
-        buildDependencies(ConsumerConfig.DEFAULT_MAX_POLL_RECORDS);
-
-        subscriptions.assignFromUser(partitions(topicAPartition0));
-
-        try (FetchBuffer<String, String> fetchBuffer = new FetchBuffer<>(logContext)) {
-            fetchBuffer.add(completedFetch(1000));
-            Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
-            assertEquals(0, fetch.numRecords());
-        }
-    }
 
     @Test
     public void testFetchNormal() {
@@ -137,6 +130,66 @@ public class FetchCollectorTest {
             // However, once we read *past* the end of the records in the CompletedFetch, then we will call
             // drain on it and it will be considered all consumed.
             assertTrue(completedFetch.isConsumed());
+        }
+    }
+
+    @Test
+    public void testNoResultsIfInitializing() {
+        buildDependencies(ConsumerConfig.DEFAULT_MAX_POLL_RECORDS);
+
+        subscriptions.assignFromUser(partitions(topicAPartition0));
+
+        try (FetchBuffer<String, String> fetchBuffer = new FetchBuffer<>(logContext)) {
+            fetchBuffer.add(completedFetch(1000));
+            Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
+            assertEquals(0, fetch.numRecords());
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+            {
+                    "10,RuntimeException,false",
+                    "0,RuntimeException,true",
+                    "10,KafkaException,false",
+                    "0,KafkaException,true"
+            }
+    )
+    public void testErrorInInitialize(int numRecords,
+                                      String exceptionClassName,
+                                      boolean shouldFetchQueueBeEmpty) {
+        buildDependencies(ConsumerConfig.DEFAULT_MAX_POLL_RECORDS);
+        subscriptions.assignFromUser(partitions(topicAPartition0));
+
+        // Create a FetchCollector that fails on CompletedFetch initialization.
+        fetchCollector = new FetchCollector<String, String>(logContext,
+                metadata,
+                subscriptions,
+                fetchConfig,
+                metricsManager,
+                time) {
+
+            @Override
+            CompletedFetch<String, String> initialize(final CompletedFetch<String, String> completedFetch) {
+                if (exceptionClassName.equalsIgnoreCase("RuntimeException"))
+                    throw new RuntimeException("Runtime error");
+                else if (exceptionClassName.equalsIgnoreCase("KafkaException"))
+                    throw new KafkaException("Kafka error");
+                else
+                    throw new IllegalArgumentException("Please provide the correct error type");
+            }
+        };
+
+        try (FetchBuffer<String, String> fetchBuffer = new FetchBuffer<>(logContext)) {
+            fetchBuffer.add(completedFetch(numRecords));
+            assertFalse(fetchBuffer.isEmpty());
+
+            if (exceptionClassName.equalsIgnoreCase("RuntimeException"))
+                assertThrows(RuntimeException.class, () -> fetchCollector.collectFetch(fetchBuffer));
+            else if (exceptionClassName.equalsIgnoreCase("KafkaException"))
+                assertThrows(KafkaException.class, () -> fetchCollector.collectFetch(fetchBuffer));
+
+            assertEquals(shouldFetchQueueBeEmpty, fetchBuffer.isEmpty());
         }
     }
 
@@ -195,8 +248,7 @@ public class FetchCollectorTest {
 
         Metrics metrics = createMetrics(config, time);
         metricsManager = createFetchMetricsManager(metrics);
-
-        ConsumerMetadata metadata = new ConsumerMetadata(
+        metadata = new ConsumerMetadata(
                 0,
                 10000,
                 false,
