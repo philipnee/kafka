@@ -61,6 +61,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * This tests the {@link FetchCollector} functionality in addition to what {@link FetcherTest} tests during the course
@@ -83,91 +84,97 @@ public class FetchCollectorTest {
 
     private ConsumerMetadata metadata;
 
+    private FetchBuffer<String, String> fetchBuffer;
+
     private FetchCollector<String, String> fetchCollector;
 
     @Test
     public void testFetchNormal() {
         int recordCount = 1000;
         buildDependencies(recordCount);
+        assignAndSeek(topicAPartition0);
 
-        subscriptions.assignFromUser(partitions(topicAPartition0));
-        subscriptions.seek(topicAPartition0, 0);
+        CompletedFetch<String, String> completedFetch = completedFetch(recordCount);
 
-        try (FetchBuffer<String, String> fetchBuffer = new FetchBuffer<>(logContext)) {
-            CompletedFetch<String, String> completedFetch = completedFetch(recordCount);
+        // Validate that the buffer is empty until after we add the fetch data.
+        assertTrue(fetchBuffer.isEmpty());
+        fetchBuffer.add(completedFetch);
+        assertFalse(fetchBuffer.isEmpty());
 
-            // Validate that the buffer is empty until after we add the fetch data.
-            assertTrue(fetchBuffer.isEmpty());
-            fetchBuffer.add(completedFetch);
-            assertFalse(fetchBuffer.isEmpty());
+        // Validate that the completed fetch isn't initialized just because we add it to the buffer.
+        assertFalse(completedFetch.isInitialized());
 
-            // Validate that the completed fetch isn't initialized just because we add it to the buffer.
-            assertFalse(completedFetch.isInitialized());
+        // Fetch the data and validate that we get all the records we want back.
+        Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
+        assertFalse(fetch.isEmpty());
+        assertEquals(recordCount, fetch.numRecords());
 
-            // Fetch the data and validate that we get all the records we want back.
-            Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
-            assertFalse(fetch.isEmpty());
-            assertEquals(recordCount, fetch.numRecords());
+        // When we collected the data from the buffer, this will cause the completed fetch to get initialized.
+        assertTrue(completedFetch.isInitialized());
 
-            // When we collected the data from the buffer, this will cause the completed fetch to get initialized.
-            assertTrue(completedFetch.isInitialized());
+        // However, even though we've collected the data, it isn't (completely) consumed yet.
+        assertFalse(completedFetch.isConsumed());
 
-            // However, even though we've collected the data, it isn't (completely) consumed yet.
-            assertFalse(completedFetch.isConsumed());
+        // The buffer is now considered "empty" because our queue is empty.
+        assertTrue(fetchBuffer.isEmpty());
+        assertNull(fetchBuffer.peek());
+        assertNull(fetchBuffer.poll());
 
-            // The buffer is now considered "empty" because our queue is empty.
-            assertTrue(fetchBuffer.isEmpty());
-            assertNull(fetchBuffer.peek());
-            assertNull(fetchBuffer.poll());
+        // However, while the queue is "empty", the next-in-line fetch is actually still in the buffer.
+        assertNotNull(fetchBuffer.nextInLineFetch());
 
-            // However, while the queue is "empty", the next-in-line fetch is actually still in the buffer.
-            assertNotNull(fetchBuffer.nextInLineFetch());
+        // Validate that the next fetch position has been updated to point to the record after our last fetched
+        // record.
+        SubscriptionState.FetchPosition position = subscriptions.position(topicAPartition0);
+        assertEquals(recordCount, position.offset);
 
-            // Validate that the next fetch position has been updated to point to the record after our last fetched
-            // record.
-            SubscriptionState.FetchPosition position = subscriptions.position(topicAPartition0);
-            assertEquals(recordCount, position.offset);
+        // Now attempt to collect more records from the fetch buffer.
+        fetch = fetchCollector.collectFetch(fetchBuffer);
 
-            // Now attempt to collect more records from the fetch buffer.
-            fetch = fetchCollector.collectFetch(fetchBuffer);
+        // The Fetch object is non-null, but it's empty.
+        assertEquals(0, fetch.numRecords());
+        assertTrue(fetch.isEmpty());
 
-            // The Fetch object is non-null, but it's empty.
-            assertEquals(0, fetch.numRecords());
-            assertTrue(fetch.isEmpty());
-
-            // However, once we read *past* the end of the records in the CompletedFetch, then we will call
-            // drain on it, and it will be considered all consumed.
-            assertTrue(completedFetch.isConsumed());
-        }
+        // However, once we read *past* the end of the records in the CompletedFetch, then we will call
+        // drain on it, and it will be considered all consumed.
+        assertTrue(completedFetch.isConsumed());
     }
 
     @Test
     public void testNoResultsIfInitializing() {
-        buildDependencies(ConsumerConfig.DEFAULT_MAX_POLL_RECORDS);
+        buildDependencies();
 
-        subscriptions.assignFromUser(partitions(topicAPartition0));
+        // Intentionally call assign (vs. assignAndSeek) so that we don't set the position. The SubscriptionState
+        // will consider the partition as in the SubscriptionState.FetchStates.INITIALIZED state.
+        assign(topicAPartition0);
 
-        try (FetchBuffer<String, String> fetchBuffer = new FetchBuffer<>(logContext)) {
-            fetchBuffer.add(completedFetch(1000));
-            Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
-            assertEquals(0, fetch.numRecords());
-        }
+        // The position should thus be null and considered un-fetchable and invalid.
+        assertNull(subscriptions.position(topicAPartition0));
+        assertFalse(subscriptions.isFetchable(topicAPartition0));
+        assertFalse(subscriptions.hasValidPosition(topicAPartition0));
+
+        // Add some valid CompletedFetch records to the FetchBuffer queue and collect them into the Fetch.
+        fetchBuffer.add(completedFetch());
+        Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
+
+        // Verify that no records are fetched for the partition as it did not have a valid position set.
+        assertEquals(0, fetch.numRecords());
     }
 
     @ParameterizedTest
     @CsvSource(
             {
-                    "10,RuntimeException,false",
-                    "0,RuntimeException,true",
-                    "10,KafkaException,false",
-                    "0,KafkaException,true"
+                    "10,runtime",
+                    "0,runtime",
+                    "10,kafka",
+                    "0,kafka"
             }
     )
-    public void testErrorInInitialize(int numRecords,
-                                      String exceptionClassName,
-                                      boolean shouldFetchQueueBeEmpty) {
-        buildDependencies(ConsumerConfig.DEFAULT_MAX_POLL_RECORDS);
-        subscriptions.assignFromUser(partitions(topicAPartition0));
+    public void testErrorInInitialize(int numRecords, String exceptionClassName) {
+        buildDependencies();
+        assignAndSeek(topicAPartition0);
+
+        final Class<? extends RuntimeException> exceptionClass = getInitializeExceptionClass(exceptionClassName);
 
         // Create a FetchCollector that fails on CompletedFetch initialization.
         fetchCollector = new FetchCollector<String, String>(logContext,
@@ -179,122 +186,83 @@ public class FetchCollectorTest {
 
             @Override
             CompletedFetch<String, String> initialize(final CompletedFetch<String, String> completedFetch) {
-                if (exceptionClassName.equalsIgnoreCase("RuntimeException"))
-                    throw new RuntimeException("Runtime error");
-                else if (exceptionClassName.equalsIgnoreCase("KafkaException"))
-                    throw new KafkaException("Kafka error");
-                else
-                    throw new IllegalArgumentException("Please provide the correct error type");
+                return throwInitializeException(exceptionClass);
             }
         };
 
-        try (FetchBuffer<String, String> fetchBuffer = new FetchBuffer<>(logContext)) {
-            fetchBuffer.add(completedFetch(numRecords));
-            assertFalse(fetchBuffer.isEmpty());
+        // Add the CompletedFetch to the FetchBuffer queue
+        fetchBuffer.add(completedFetch(numRecords));
 
-            if (exceptionClassName.equalsIgnoreCase("RuntimeException"))
-                assertThrows(RuntimeException.class, () -> fetchCollector.collectFetch(fetchBuffer));
-            else if (exceptionClassName.equalsIgnoreCase("KafkaException"))
-                assertThrows(KafkaException.class, () -> fetchCollector.collectFetch(fetchBuffer));
+        // At first, the queue is populated
+        assertFalse(fetchBuffer.isEmpty());
 
-            assertEquals(shouldFetchQueueBeEmpty, fetchBuffer.isEmpty());
-        }
+        // Now run our ill-fated collectFetch.
+        assertThrows(exceptionClass, () -> fetchCollector.collectFetch(fetchBuffer));
+
+        // If the number of records in the CompletedFetch was 0, the call to FetchCollector.collectFetch() will
+        // remove it from the queue. If there are records in the CompletedFetch, FetchCollector.collectFetch will
+        // leave it on the queue.
+        assertEquals(numRecords == 0, fetchBuffer.isEmpty());
     }
 
     @Test
     public void testFetchingPausedPartitionsYieldsNoRecords() {
-        buildDependencies(ConsumerConfig.DEFAULT_MAX_POLL_RECORDS);
+        buildDependencies();
+        assignAndSeek(topicAPartition0);
 
-        subscriptions.assignFromUser(partitions(topicAPartition0));
+        // The partition should not be 'paused' in the SubscriptionState until we explicitly tell it to.
+        assertFalse(subscriptions.isPaused(topicAPartition0));
         subscriptions.pause(topicAPartition0);
-        assertTrue(
-                subscriptions.isPaused(topicAPartition0),
-                "The partition " + topicAPartition0 + " should be 'paused' in the SubscriptionState"
-        );
+        assertTrue(subscriptions.isPaused(topicAPartition0));
 
-        try (FetchBuffer<String, String> fetchBuffer = new FetchBuffer<>(logContext)) {
-            CompletedFetch<String, String> completedFetch = completedFetch(10);
+        CompletedFetch<String, String> completedFetch = completedFetch();
 
-            // Set the CompletedFetch to the next-in-line fetch, *not* the queue.
-            fetchBuffer.setNextInLineFetch(completedFetch);
+        // Set the CompletedFetch to the next-in-line fetch, *not* the queue.
+        fetchBuffer.setNextInLineFetch(completedFetch);
 
-            assertSame(
-                    fetchBuffer.nextInLineFetch(),
-                    completedFetch,
-                    "The next-in-line CompletedFetch should reference the same object that was just created"
-            );
-            assertTrue(
-                    fetchBuffer.isEmpty(),
-                    "The FetchBuffer queue should be empty as the CompletedFetch was added to the " +
-                            "next-in-line CompletedFetch, not the queue"
-            );
-            assertTrue(
-                    subscriptions.isPaused(completedFetch.partition),
-                    "The partition (" + completedFetch.partition + ") for the next-in-line " +
-                            "CompletedFetch should be 'paused' in the SubscriptionState"
-            );
+        // The next-in-line CompletedFetch should reference the same object that was just created
+        assertSame(fetchBuffer.nextInLineFetch(), completedFetch);
 
-            Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
+        // The FetchBuffer queue should be empty as the CompletedFetch was added to the next-in-line.
+        // CompletedFetch, not the queue.
+        assertTrue(fetchBuffer.isEmpty());
 
-            assertEquals(
-                    0,
-                    fetch.numRecords(),
-                    "There should be no records in the Fetch as the partition being fetched (" +
-                            completedFetch.partition + ") is 'paused' in the SubscriptionState"
-            );
-            assertFalse(
-                    fetchBuffer.isEmpty(),
-                    "The FetchBuffer queue should not be empty; the CompletedFetch is added to the " +
-                            "FetchBuffer queue by the FetchCollector when it detects a 'paused' " +
-                            "partition (" + completedFetch.partition + ")"
-            );
-            assertNull(
-                    fetchBuffer.nextInLineFetch(),
-                    "The next-in-line CompletedFetch should be null;; the CompletedFetch is added to " +
-                            "the FetchBuffer queue by the FetchCollector when it detects a 'paused' " +
-                            "partition (" + completedFetch.partition + ")"
-            );
-        }
-    }
+        // Ensure that the partition for the next-in-line CompletedFetch is still 'paused'.
+        assertTrue(subscriptions.isPaused(completedFetch.partition));
 
+        Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
 
-    /**
-     * Supplies the {@link Arguments} to {@link #testFetchWithMetadataRefreshErrors(Errors)}.
-     */
-    private static Stream<Arguments> handleInitializeErrorSource() {
-        List<Errors> errors = Arrays.asList(
-                Errors.NOT_LEADER_OR_FOLLOWER,
-                Errors.REPLICA_NOT_AVAILABLE,
-                Errors.KAFKA_STORAGE_ERROR,
-                Errors.FENCED_LEADER_EPOCH,
-                Errors.OFFSET_NOT_AVAILABLE,
-                Errors.UNKNOWN_TOPIC_OR_PARTITION,
-                Errors.UNKNOWN_TOPIC_ID,
-                Errors.INCONSISTENT_TOPIC_ID
-        );
+        // There should be no records in the Fetch as the partition being fetched is 'paused'.
+        assertEquals(0, fetch.numRecords());
 
-        return errors.stream().map(Arguments::of);
+        // The FetchBuffer queue should not be empty; the CompletedFetch is added to the FetchBuffer queue by
+        // the FetchCollector when it detects a 'paused' partition.
+        assertFalse(fetchBuffer.isEmpty());
+
+        // The next-in-line CompletedFetch should be null; the CompletedFetch is added to the FetchBuffer
+        // queue by the FetchCollector when it detects a 'paused' partition.
+        assertNull(fetchBuffer.nextInLineFetch());
     }
 
     @ParameterizedTest
     @MethodSource("handleInitializeErrorSource")
     public void testFetchWithMetadataRefreshErrors(final Errors error) {
-        buildDependencies(ConsumerConfig.DEFAULT_MAX_POLL_RECORDS);
+        buildDependencies();
+        assignAndSeek(topicAPartition0);
 
-        subscriptions.assignFromUser(partitions(topicAPartition0));
-        subscriptions.seek(topicAPartition0, 0);
+        CompletedFetch<String, String> completedFetch = completedFetch(10, error);
+        fetchBuffer.add(completedFetch);
+        subscriptions.preferredReadReplica(completedFetch.partition, time.milliseconds());
+        assertNotNull(subscriptions.preferredReadReplica(completedFetch.partition, time.milliseconds()));
+        // Fetch the data and validate that we get all the records we want back.
+        Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
+        assertTrue(fetch.isEmpty());
+        assertTrue(metadata.updateRequested());
+        assertEquals(Optional.empty(), subscriptions.preferredReadReplica(completedFetch.partition, time.milliseconds()));
+    }
 
-        try (FetchBuffer<String, String> fetchBuffer = new FetchBuffer<>(logContext)) {
-            CompletedFetch<String, String> completedFetch = completedFetch(10, error);
-            fetchBuffer.add(completedFetch);
-            subscriptions.preferredReadReplica(completedFetch.partition, time.milliseconds());
-            assertNotNull(subscriptions.preferredReadReplica(completedFetch.partition, time.milliseconds()));
-            // Fetch the data and validate that we get all the records we want back.
-            Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
-            assertTrue(fetch.isEmpty());
-            assertTrue(metadata.updateRequested());
-            assertEquals(Optional.empty(), subscriptions.preferredReadReplica(completedFetch.partition, time.milliseconds()));
-        }
+    private CompletedFetch<String, String> completedFetch() {
+        return completedFetch(10);
     }
 
     private CompletedFetch<String, String> completedFetch(int recordCount) {
@@ -347,6 +315,10 @@ public class FetchCollectorTest {
         return new HashSet<>(Arrays.asList(partitions));
     }
 
+    private void buildDependencies() {
+        buildDependencies(ConsumerConfig.DEFAULT_MAX_POLL_RECORDS);
+    }
+
     private void buildDependencies(int maxPollRecords) {
         logContext = new LogContext();
 
@@ -380,5 +352,56 @@ public class FetchCollectorTest {
                 fetchConfig,
                 metricsManager,
                 time);
+        fetchBuffer = new FetchBuffer<>(logContext);
+    }
+
+    private void assign(TopicPartition... partitions) {
+        subscriptions.assignFromUser(partitions(partitions));
+    }
+
+    private void assignAndSeek(TopicPartition tp) {
+        assign(tp);
+        subscriptions.seek(tp, 0);
+    }
+
+    /**
+     * Supplies the {@link Arguments} to {@link #testFetchWithMetadataRefreshErrors(Errors)}.
+     */
+    private static Stream<Arguments> handleInitializeErrorSource() {
+        List<Errors> errors = Arrays.asList(
+                Errors.NOT_LEADER_OR_FOLLOWER,
+                Errors.REPLICA_NOT_AVAILABLE,
+                Errors.KAFKA_STORAGE_ERROR,
+                Errors.FENCED_LEADER_EPOCH,
+                Errors.OFFSET_NOT_AVAILABLE,
+                Errors.UNKNOWN_TOPIC_OR_PARTITION,
+                Errors.UNKNOWN_TOPIC_ID,
+                Errors.INCONSISTENT_TOPIC_ID
+        );
+
+        return errors.stream().map(Arguments::of);
+    }
+
+    private Class<? extends RuntimeException> getInitializeExceptionClass(String exceptionClassName) {
+        if (exceptionClassName.equalsIgnoreCase("runtime"))
+            return RuntimeException.class;
+
+        if (exceptionClassName.equalsIgnoreCase("kafka"))
+            return KafkaException.class;
+
+        fail("Please provide the correct error type");
+
+        // We won't get to here. This is just to appease the compiler...
+        return RuntimeException.class;
+    }
+
+    private CompletedFetch<String, String> throwInitializeException(Class<? extends RuntimeException> exceptionClass) {
+        if (exceptionClass == RuntimeException.class)
+            throw new RuntimeException("Runtime error");
+
+        if (exceptionClass == KafkaException.class)
+            throw new KafkaException("Kafka error");
+
+        throw new IllegalArgumentException("Please provide the correct error type");
     }
 }
