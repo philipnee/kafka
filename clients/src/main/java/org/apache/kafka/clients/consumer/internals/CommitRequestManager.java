@@ -193,37 +193,37 @@ public class CommitRequestManager implements RequestManager {
                 OffsetAndMetadata offsetAndMetadata = entry.getValue();
 
                 OffsetCommitRequestData.OffsetCommitRequestTopic topic = requestTopicDataMap
-                    .getOrDefault(topicPartition.topic(),
-                        new OffsetCommitRequestData.OffsetCommitRequestTopic()
-                            .setName(topicPartition.topic())
-                    );
+                        .getOrDefault(topicPartition.topic(),
+                                new OffsetCommitRequestData.OffsetCommitRequestTopic()
+                                        .setName(topicPartition.topic())
+                        );
 
                 topic.partitions().add(new OffsetCommitRequestData.OffsetCommitRequestPartition()
-                    .setPartitionIndex(topicPartition.partition())
-                    .setCommittedOffset(offsetAndMetadata.offset())
-                    .setCommittedLeaderEpoch(offsetAndMetadata.leaderEpoch().orElse(RecordBatch.NO_PARTITION_LEADER_EPOCH))
-                    .setCommittedMetadata(offsetAndMetadata.metadata())
+                        .setPartitionIndex(topicPartition.partition())
+                        .setCommittedOffset(offsetAndMetadata.offset())
+                        .setCommittedLeaderEpoch(offsetAndMetadata.leaderEpoch().orElse(RecordBatch.NO_PARTITION_LEADER_EPOCH))
+                        .setCommittedMetadata(offsetAndMetadata.metadata())
                 );
                 requestTopicDataMap.put(topicPartition.topic(), topic);
             }
 
             OffsetCommitRequest.Builder builder = new OffsetCommitRequest.Builder(
-                new OffsetCommitRequestData()
-                    .setGroupId(this.groupId)
-                    .setGenerationId(generation.generationId)
-                    .setMemberId(generation.memberId)
-                    .setGroupInstanceId(groupInstanceId)
-                    .setTopics(new ArrayList<>(requestTopicDataMap.values())));
+                    new OffsetCommitRequestData()
+                            .setGroupId(this.groupId)
+                            .setGenerationId(generation.generationId)
+                            .setMemberId(generation.memberId)
+                            .setGroupInstanceId(groupInstanceId)
+                            .setTopics(new ArrayList<>(requestTopicDataMap.values())));
             return new NetworkClientDelegate.UnsentRequest(
-                builder,
-                coordinatorRequestManager.coordinator(),
-                (response, throwable) -> {
-                    if (throwable == null) {
-                        this.future().complete(null);
-                    } else {
-                        this.future().completeExceptionally(throwable);
-                    }
-                });
+                    builder,
+                    coordinatorRequestManager.coordinator(),
+                    (response, throwable) -> {
+                        if (throwable == null) {
+                            this.future().complete(null);
+                        } else {
+                            this.future().completeExceptionally(throwable);
+                        }
+                    });
         }
     }
 
@@ -250,11 +250,10 @@ public class CommitRequestManager implements RequestManager {
                     true,
                     new ArrayList<>(this.requestedPartitions),
                     throwOnFetchStableOffsetUnsupported);
-            NetworkClientDelegate.UnsentRequest unsentRequest = new NetworkClientDelegate.UnsentRequest(
-                builder,
-                coordinatorRequestManager.coordinator(),
-                (r, t) -> onResponse(currentTimeMs, (OffsetFetchResponse) r.responseBody()));
-            return unsentRequest;
+            return new NetworkClientDelegate.UnsentRequest(
+                    builder,
+                    coordinatorRequestManager.coordinator(),
+                    (r, t) -> onResponse(currentTimeMs, (OffsetFetchResponse) r.responseBody()));
         }
 
         public void onResponse(
@@ -364,7 +363,7 @@ public class CommitRequestManager implements RequestManager {
      * <li>unsentOffsetCommits holds the offset commit requests that have not been sent out</>
      * <li>unsentOffsetFetches holds the offset fetch requests that have not been sent out</li>
      * <li>inflightOffsetFetches holds the offset fetch requests that have been sent out but not completed</>.
-     *
+     * <p>
      * {@code addOffsetFetchRequest} dedupes the requests to avoid sending the same requests.
      */
 
@@ -374,7 +373,7 @@ public class CommitRequestManager implements RequestManager {
         List<CompletableOffsetFetchRequest> unsentOffsetFetches = new ArrayList<>();
         List<CompletableOffsetFetchRequest> inflightOffsetFetches = new ArrayList<>();
 
-        public boolean hasUnsentRequests() {
+        boolean hasUnsentRequests() {
             return !unsentOffsetCommits.isEmpty() || !unsentOffsetFetches.isEmpty();
         }
 
@@ -390,11 +389,11 @@ public class CommitRequestManager implements RequestManager {
         }
 
         /**
-         *  <p>Adding an offset fetch request to the outgoing buffer.  If the same request was made, we chain the future
-         *  to the existing one.
+         * <p>Adding an offset fetch request to the outgoing buffer.  If the same request was made, we chain the future
+         * to the existing one.
          *
-         *  <p>If the request is new, it invokes a callback to remove itself from the {@code inflightOffsetFetches}
-         *  upon completion.</>
+         * <p>If the request is new, it invokes a callback to remove itself from the {@code inflightOffsetFetches}
+         * upon completion.</>
          */
         private CompletableFuture<Map<TopicPartition, OffsetAndMetadata>> addOffsetFetchRequest(final CompletableOffsetFetchRequest request) {
             Optional<CompletableOffsetFetchRequest> dupe =
@@ -429,11 +428,11 @@ public class CommitRequestManager implements RequestManager {
         /**
          * Clear {@code unsentOffsetCommits} and moves all the sendable request in {@code unsentOffsetFetches} to the
          * {@code inflightOffsetFetches} to bookkeep all of the inflight requests.
-         *
+         * <p>
          * Note: Sendable requests are determined by their timer as we are expecting backoff on failed attempt. See
          * {@link RequestState}.
          **/
-        public List<NetworkClientDelegate.UnsentRequest> drain(final long currentTimeMs) {
+        List<NetworkClientDelegate.UnsentRequest> drain(final long currentTimeMs) {
             List<NetworkClientDelegate.UnsentRequest> unsentRequests = new ArrayList<>();
 
             // Add all unsent offset commit requests to the unsentRequests list
