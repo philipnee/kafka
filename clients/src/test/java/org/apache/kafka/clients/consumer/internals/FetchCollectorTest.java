@@ -19,6 +19,7 @@ package org.apache.kafka.clients.consumer.internals;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.TopicAuthorizationException;
 import org.apache.kafka.common.internals.ClusterResourceListeners;
 import org.apache.kafka.common.message.FetchResponseData;
 import org.apache.kafka.common.metrics.Metrics;
@@ -38,10 +39,10 @@ import org.apache.kafka.common.utils.Time;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -61,7 +62,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * This tests the {@link FetchCollector} functionality in addition to what {@link FetcherTest} tests during the course
@@ -69,6 +69,8 @@ import static org.junit.jupiter.api.Assertions.fail;
  */
 public class FetchCollectorTest {
 
+    private final static int DEFAULT_RECORD_COUNT = 10;
+    private final static int DEFAULT_MAX_POLL_RECORDS = ConsumerConfig.DEFAULT_MAX_POLL_RECORDS;
     private final Time time = new MockTime(0, 0, 0);
     private final TopicPartition topicAPartition0 = new TopicPartition("topic-a", 0);
     private final TopicPartition topicAPartition1 = new TopicPartition("topic-a", 1);
@@ -77,24 +79,22 @@ public class FetchCollectorTest {
     private LogContext logContext;
 
     private SubscriptionState subscriptions;
-
     private FetchConfig<String, String> fetchConfig;
-
     private FetchMetricsManager metricsManager;
-
     private ConsumerMetadata metadata;
-
     private FetchBuffer<String, String> fetchBuffer;
-
     private FetchCollector<String, String> fetchCollector;
+    private CompletedFetchBuilder completedFetchBuilder;
 
     @Test
     public void testFetchNormal() {
-        int recordCount = 1000;
-        buildDependencies(recordCount);
+        int recordCount = DEFAULT_MAX_POLL_RECORDS;
+        buildDependencies();
         assignAndSeek(topicAPartition0);
 
-        CompletedFetch<String, String> completedFetch = completedFetch(recordCount);
+        CompletedFetch<String, String> completedFetch = completedFetchBuilder
+                .recordCount(recordCount)
+                .build();
 
         // Validate that the buffer is empty until after we add the fetch data.
         assertTrue(fetchBuffer.isEmpty());
@@ -141,6 +141,26 @@ public class FetchCollectorTest {
     }
 
     @Test
+    public void testFetchWithReadReplica() {
+        buildDependencies();
+        assignAndSeek(topicAPartition0);
+
+        // Set the preferred read replica and just to be safe, verify it was set.
+        int preferredReadReplicaId = 67;
+        subscriptions.updatePreferredReadReplica(topicAPartition0, preferredReadReplicaId, time::milliseconds);
+        assertNotNull(subscriptions.preferredReadReplica(topicAPartition0, time.milliseconds()));
+        assertEquals(Optional.of(preferredReadReplicaId), subscriptions.preferredReadReplica(topicAPartition0, time.milliseconds()));
+
+        CompletedFetch<String, String> completedFetch = completedFetchBuilder.build();
+        fetchBuffer.add(completedFetch);
+        Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
+
+        // The Fetch and read replica settings should be empty.
+        assertEquals(DEFAULT_RECORD_COUNT, fetch.numRecords());
+        assertEquals(Optional.of(preferredReadReplicaId), subscriptions.preferredReadReplica(topicAPartition0, time.milliseconds()));
+    }
+
+    @Test
     public void testNoResultsIfInitializing() {
         buildDependencies();
 
@@ -154,7 +174,8 @@ public class FetchCollectorTest {
         assertFalse(subscriptions.hasValidPosition(topicAPartition0));
 
         // Add some valid CompletedFetch records to the FetchBuffer queue and collect them into the Fetch.
-        fetchBuffer.add(completedFetch());
+        CompletedFetch<String, String> completedFetch = completedFetchBuilder.build();
+        fetchBuffer.add(completedFetch);
         Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
 
         // Verify that no records are fetched for the partition as it did not have a valid position set.
@@ -162,19 +183,10 @@ public class FetchCollectorTest {
     }
 
     @ParameterizedTest
-    @CsvSource(
-            {
-                    "10,runtime",
-                    "0,runtime",
-                    "10,kafka",
-                    "0,kafka"
-            }
-    )
-    public void testErrorInInitialize(int numRecords, String exceptionClassName) {
+    @MethodSource("testErrorInInitializeSource")
+    public void testErrorInInitialize(int recordCount, RuntimeException expectedException) {
         buildDependencies();
         assignAndSeek(topicAPartition0);
-
-        final Class<? extends RuntimeException> exceptionClass = getInitializeExceptionClass(exceptionClassName);
 
         // Create a FetchCollector that fails on CompletedFetch initialization.
         fetchCollector = new FetchCollector<String, String>(logContext,
@@ -186,23 +198,26 @@ public class FetchCollectorTest {
 
             @Override
             CompletedFetch<String, String> initialize(final CompletedFetch<String, String> completedFetch) {
-                return throwInitializeException(exceptionClass);
+                throw expectedException;
             }
         };
 
         // Add the CompletedFetch to the FetchBuffer queue
-        fetchBuffer.add(completedFetch(numRecords));
+        CompletedFetch<String, String> completedFetch = completedFetchBuilder
+                .recordCount(recordCount)
+                .build();
+        fetchBuffer.add(completedFetch);
 
         // At first, the queue is populated
         assertFalse(fetchBuffer.isEmpty());
 
         // Now run our ill-fated collectFetch.
-        assertThrows(exceptionClass, () -> fetchCollector.collectFetch(fetchBuffer));
+        assertThrows(expectedException.getClass(), () -> fetchCollector.collectFetch(fetchBuffer));
 
         // If the number of records in the CompletedFetch was 0, the call to FetchCollector.collectFetch() will
         // remove it from the queue. If there are records in the CompletedFetch, FetchCollector.collectFetch will
         // leave it on the queue.
-        assertEquals(numRecords == 0, fetchBuffer.isEmpty());
+        assertEquals(recordCount == 0, fetchBuffer.isEmpty());
     }
 
     @Test
@@ -215,7 +230,7 @@ public class FetchCollectorTest {
         subscriptions.pause(topicAPartition0);
         assertTrue(subscriptions.isPaused(topicAPartition0));
 
-        CompletedFetch<String, String> completedFetch = completedFetch();
+        CompletedFetch<String, String> completedFetch = completedFetchBuilder.build();
 
         // Set the CompletedFetch to the next-in-line fetch, *not* the queue.
         fetchBuffer.setNextInLineFetch(completedFetch);
@@ -245,67 +260,149 @@ public class FetchCollectorTest {
     }
 
     @ParameterizedTest
-    @MethodSource("handleInitializeErrorSource")
+    @MethodSource("testFetchWithMetadataRefreshErrorsSource")
     public void testFetchWithMetadataRefreshErrors(final Errors error) {
         buildDependencies();
         assignAndSeek(topicAPartition0);
 
-        CompletedFetch<String, String> completedFetch = completedFetch(10, error);
+        CompletedFetch<String, String> completedFetch = completedFetchBuilder
+                .error(error)
+                .build();
         fetchBuffer.add(completedFetch);
-        subscriptions.preferredReadReplica(completedFetch.partition, time.milliseconds());
-        assertNotNull(subscriptions.preferredReadReplica(completedFetch.partition, time.milliseconds()));
+
+        // Set the preferred read replica and just to be safe, verify it was set.
+        int preferredReadReplicaId = 5;
+        subscriptions.updatePreferredReadReplica(topicAPartition0, preferredReadReplicaId, time::milliseconds);
+        assertNotNull(subscriptions.preferredReadReplica(topicAPartition0, time.milliseconds()));
+        assertEquals(Optional.of(preferredReadReplicaId), subscriptions.preferredReadReplica(topicAPartition0, time.milliseconds()));
+
         // Fetch the data and validate that we get all the records we want back.
         Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
         assertTrue(fetch.isEmpty());
         assertTrue(metadata.updateRequested());
-        assertEquals(Optional.empty(), subscriptions.preferredReadReplica(completedFetch.partition, time.milliseconds()));
+        assertEquals(Optional.empty(), subscriptions.preferredReadReplica(topicAPartition0, time.milliseconds()));
     }
 
-    private CompletedFetch<String, String> completedFetch() {
-        return completedFetch(10);
+    @Test
+    public void testFetchWithOffsetOutOfRange() {
+        buildDependencies();
+        assignAndSeek(topicAPartition0);
+
+        CompletedFetch<String, String> completedFetch = completedFetchBuilder.build();
+        fetchBuffer.add(completedFetch);
+
+        // Fetch the data and validate that we get our first batch of records back.
+        Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
+        assertFalse(fetch.isEmpty());
+        assertEquals(DEFAULT_RECORD_COUNT, fetch.numRecords());
+
+        // Try to fetch more data and validate that we get an empty Fetch back.
+        completedFetch = completedFetchBuilder
+                .fetchOffset(fetch.numRecords())
+                .error(Errors.OFFSET_OUT_OF_RANGE)
+                .build();
+        fetchBuffer.add(completedFetch);
+        fetch = fetchCollector.collectFetch(fetchBuffer);
+        assertTrue(fetch.isEmpty());
+
+        // Try to fetch more data and validate that we get an empty Fetch back.
+        completedFetch = completedFetchBuilder
+                .fetchOffset(fetch.numRecords())
+                .error(Errors.OFFSET_OUT_OF_RANGE)
+                .build();
+        fetchBuffer.add(completedFetch);
+        fetch = fetchCollector.collectFetch(fetchBuffer);
+        assertTrue(fetch.isEmpty());
     }
 
-    private CompletedFetch<String, String> completedFetch(int recordCount) {
-        return completedFetch(recordCount, null);
+    @Test
+    public void testFetchWithOffsetOutOfRangeWithPreferredReadReplica() {
+        int records = 10;
+        buildDependencies(records);
+        assignAndSeek(topicAPartition0);
+
+        // Set the preferred read replica and just to be safe, verify it was set.
+        int preferredReadReplicaId = 67;
+        subscriptions.updatePreferredReadReplica(topicAPartition0, preferredReadReplicaId, time::milliseconds);
+        assertNotNull(subscriptions.preferredReadReplica(topicAPartition0, time.milliseconds()));
+        assertEquals(Optional.of(preferredReadReplicaId), subscriptions.preferredReadReplica(topicAPartition0, time.milliseconds()));
+
+        CompletedFetch<String, String> completedFetch = completedFetchBuilder
+                .error(Errors.OFFSET_OUT_OF_RANGE)
+                .build();
+        fetchBuffer.add(completedFetch);
+        Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
+
+        // The Fetch and read replica settings should be empty.
+        assertTrue(fetch.isEmpty());
+        assertEquals(Optional.empty(), subscriptions.preferredReadReplica(topicAPartition0, time.milliseconds()));
     }
 
-    private CompletedFetch<String, String> completedFetch(int count, Errors error) {
-        Records records;
+    @Test
+    public void testFetchWithTopicAuthorizationFailed() {
+        buildDependencies();
+        assignAndSeek(topicAPartition0);
 
-        ByteBuffer allocate = ByteBuffer.allocate(1024);
-        try (MemoryRecordsBuilder builder = MemoryRecords.builder(allocate,
-                CompressionType.NONE,
-                TimestampType.CREATE_TIME,
-                0)) {
-            for (int i = 0; i < count; i++)
-                builder.append(0L, "key".getBytes(), ("value-" + i).getBytes());
-
-            records = builder.build();
-        }
-
-        FetchResponseData.PartitionData partitionData = new FetchResponseData.PartitionData()
-                .setPartitionIndex(topicAPartition0.partition())
-                .setHighWatermark(1000)
-                .setRecords(records);
-
-        if (error != null)
-            partitionData.setErrorCode(error.code());
-
-        return completedFetch(topicAPartition0, partitionData);
+        // Try to data and validate that we get an empty Fetch back.
+        CompletedFetch<String, String> completedFetch = completedFetchBuilder
+                .error(Errors.TOPIC_AUTHORIZATION_FAILED)
+                .build();
+        fetchBuffer.add(completedFetch);
+        assertThrows(TopicAuthorizationException.class, () -> fetchCollector.collectFetch(fetchBuffer));
     }
 
-    private CompletedFetch<String, String> completedFetch(TopicPartition tp, FetchResponseData.PartitionData partitionData) {
-        FetchMetricsAggregator metricsAggregator = new FetchMetricsAggregator(metricsManager, allPartitions);
-        return new CompletedFetch<>(
-                logContext,
-                subscriptions,
-                fetchConfig,
-                BufferSupplier.create(),
-                tp,
-                partitionData,
-                metricsAggregator,
-                0L,
-                ApiKeys.FETCH.latestVersion());
+    @Test
+    public void testFetchWithUnknownLeaderEpoch() {
+        buildDependencies();
+        assignAndSeek(topicAPartition0);
+
+        // Try to data and validate that we get an empty Fetch back.
+        CompletedFetch<String, String> completedFetch = completedFetchBuilder
+                .error(Errors.UNKNOWN_LEADER_EPOCH)
+                .build();
+        fetchBuffer.add(completedFetch);
+        Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
+        assertTrue(fetch.isEmpty());
+    }
+
+    @Test
+    public void testFetchWithUnknownServerError() {
+        buildDependencies();
+        assignAndSeek(topicAPartition0);
+
+        // Try to data and validate that we get an empty Fetch back.
+        CompletedFetch<String, String> completedFetch = completedFetchBuilder
+                .error(Errors.UNKNOWN_SERVER_ERROR)
+                .build();
+        fetchBuffer.add(completedFetch);
+        Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
+        assertTrue(fetch.isEmpty());
+    }
+
+    @Test
+    public void testFetchWithCorruptMessage() {
+        buildDependencies();
+        assignAndSeek(topicAPartition0);
+
+        // Try to data and validate that we get an empty Fetch back.
+        CompletedFetch<String, String> completedFetch = completedFetchBuilder
+                .error(Errors.CORRUPT_MESSAGE)
+                .build();
+        fetchBuffer.add(completedFetch);
+        assertThrows(KafkaException.class, () -> fetchCollector.collectFetch(fetchBuffer));
+    }
+
+    @ParameterizedTest
+    @MethodSource("testFetchWithOtherErrorsSource")
+    public void testFetchWithOtherErrors(final Errors error) {
+        buildDependencies();
+        assignAndSeek(topicAPartition0);
+
+        CompletedFetch<String, String> completedFetch = completedFetchBuilder
+                .error(error)
+                .build();
+        fetchBuffer.add(completedFetch);
+        assertThrows(IllegalStateException.class, () -> fetchCollector.collectFetch(fetchBuffer));
     }
 
     /**
@@ -316,7 +413,7 @@ public class FetchCollectorTest {
     }
 
     private void buildDependencies() {
-        buildDependencies(ConsumerConfig.DEFAULT_MAX_POLL_RECORDS);
+        buildDependencies(DEFAULT_MAX_POLL_RECORDS);
     }
 
     private void buildDependencies(int maxPollRecords) {
@@ -353,6 +450,7 @@ public class FetchCollectorTest {
                 metricsManager,
                 time);
         fetchBuffer = new FetchBuffer<>(logContext);
+        completedFetchBuilder = new CompletedFetchBuilder();
     }
 
     private void assign(TopicPartition... partitions) {
@@ -367,7 +465,7 @@ public class FetchCollectorTest {
     /**
      * Supplies the {@link Arguments} to {@link #testFetchWithMetadataRefreshErrors(Errors)}.
      */
-    private static Stream<Arguments> handleInitializeErrorSource() {
+    private static Stream<Arguments> testFetchWithMetadataRefreshErrorsSource() {
         List<Errors> errors = Arrays.asList(
                 Errors.NOT_LEADER_OR_FOLLOWER,
                 Errors.REPLICA_NOT_AVAILABLE,
@@ -382,26 +480,100 @@ public class FetchCollectorTest {
         return errors.stream().map(Arguments::of);
     }
 
-    private Class<? extends RuntimeException> getInitializeExceptionClass(String exceptionClassName) {
-        if (exceptionClassName.equalsIgnoreCase("runtime"))
-            return RuntimeException.class;
+    /**
+     * Supplies the {@link Arguments} to {@link #testFetchWithOtherErrors(Errors)}.
+     */
+    private static Stream<Arguments> testFetchWithOtherErrorsSource() {
+        List<Errors> errors = new ArrayList<>(Arrays.asList(Errors.values()));
+        errors.removeAll(Arrays.asList(
+                Errors.NONE,
+                Errors.NOT_LEADER_OR_FOLLOWER,
+                Errors.REPLICA_NOT_AVAILABLE,
+                Errors.KAFKA_STORAGE_ERROR,
+                Errors.FENCED_LEADER_EPOCH,
+                Errors.OFFSET_NOT_AVAILABLE,
+                Errors.UNKNOWN_TOPIC_OR_PARTITION,
+                Errors.UNKNOWN_TOPIC_ID,
+                Errors.INCONSISTENT_TOPIC_ID,
+                Errors.OFFSET_OUT_OF_RANGE,
+                Errors.TOPIC_AUTHORIZATION_FAILED,
+                Errors.UNKNOWN_LEADER_EPOCH,
+                Errors.UNKNOWN_SERVER_ERROR,
+                Errors.CORRUPT_MESSAGE
+        ));
 
-        if (exceptionClassName.equalsIgnoreCase("kafka"))
-            return KafkaException.class;
-
-        fail("Please provide the correct error type");
-
-        // We won't get to here. This is just to appease the compiler...
-        return RuntimeException.class;
+        return errors.stream().map(Arguments::of);
     }
 
-    private CompletedFetch<String, String> throwInitializeException(Class<? extends RuntimeException> exceptionClass) {
-        if (exceptionClass == RuntimeException.class)
-            throw new RuntimeException("Runtime error");
 
-        if (exceptionClass == KafkaException.class)
-            throw new KafkaException("Kafka error");
+    /**
+     * Supplies the {@link Arguments} to {@link #testErrorInInitialize(int, RuntimeException)}.
+     */
+    private static Stream<Arguments> testErrorInInitializeSource() {
+        return Stream.of(
+                Arguments.of(10, new RuntimeException()),
+                Arguments.of(0, new RuntimeException()),
+                Arguments.of(10, new KafkaException()),
+                Arguments.of(0, new KafkaException())
+        );
+    }
 
-        throw new IllegalArgumentException("Please provide the correct error type");
+    private class CompletedFetchBuilder {
+
+        private long fetchOffset = 0;
+
+        private int recordCount = DEFAULT_RECORD_COUNT;
+
+        private Errors error = null;
+
+        private CompletedFetchBuilder fetchOffset(long fetchOffset) {
+            this.fetchOffset = fetchOffset;
+            return this;
+        }
+
+        private CompletedFetchBuilder recordCount(int recordCount) {
+            this.recordCount = recordCount;
+            return this;
+        }
+
+        private CompletedFetchBuilder error(Errors error) {
+            this.error = error;
+            return this;
+        }
+
+        private CompletedFetch<String, String> build() {
+            Records records;
+            ByteBuffer allocate = ByteBuffer.allocate(1024);
+
+            try (MemoryRecordsBuilder builder = MemoryRecords.builder(allocate,
+                    CompressionType.NONE,
+                    TimestampType.CREATE_TIME,
+                    0)) {
+                for (int i = 0; i < recordCount; i++)
+                    builder.append(0L, "key".getBytes(), ("value-" + i).getBytes());
+
+                records = builder.build();
+            }
+
+            FetchResponseData.PartitionData partitionData = new FetchResponseData.PartitionData()
+                    .setPartitionIndex(topicAPartition0.partition())
+                    .setHighWatermark(1000)
+                    .setRecords(records);
+
+            if (error != null)
+                partitionData.setErrorCode(error.code());
+
+            FetchMetricsAggregator metricsAggregator = new FetchMetricsAggregator(metricsManager, allPartitions);
+            return new CompletedFetch<>(
+                    logContext,
+                    subscriptions,
+                    fetchConfig,
+                    BufferSupplier.create(),
+                    topicAPartition0,
+                    partitionData,
+                    metricsAggregator,
+                    fetchOffset,
+                    ApiKeys.FETCH.latestVersion());
+        }
     }
 }
