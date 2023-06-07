@@ -51,6 +51,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -190,6 +191,62 @@ public class FetchCollectorTest {
                 assertThrows(KafkaException.class, () -> fetchCollector.collectFetch(fetchBuffer));
 
             assertEquals(shouldFetchQueueBeEmpty, fetchBuffer.isEmpty());
+        }
+    }
+
+    @Test
+    public void testFetchingPausedPartitionsYieldsNoRecords() {
+        buildDependencies(ConsumerConfig.DEFAULT_MAX_POLL_RECORDS);
+
+        subscriptions.assignFromUser(partitions(topicAPartition0));
+        subscriptions.pause(topicAPartition0);
+        assertTrue(
+                subscriptions.isPaused(topicAPartition0),
+                "The partition " + topicAPartition0 + " should be 'paused' in the SubscriptionState"
+        );
+
+        try (FetchBuffer<String, String> fetchBuffer = new FetchBuffer<>(logContext)) {
+            CompletedFetch<String, String> completedFetch = completedFetch(10);
+
+            // Set the CompletedFetch to the next-in-line fetch, *not* the queue.
+            fetchBuffer.setNextInLineFetch(completedFetch);
+
+            assertSame(
+                    fetchBuffer.nextInLineFetch(),
+                    completedFetch,
+                    "The next-in-line CompletedFetch should reference the same object that was just created"
+            );
+            assertTrue(
+                    fetchBuffer.isEmpty(),
+                    "The FetchBuffer queue should be empty as the CompletedFetch was added to the " +
+                            "next-in-line CompletedFetch, not the queue"
+            );
+            assertTrue(
+                    subscriptions.isPaused(completedFetch.partition),
+                    "The partition (" + completedFetch.partition + ") for the next-in-line " +
+                            "CompletedFetch should be 'paused' in the SubscriptionState"
+            );
+
+            Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
+
+            assertEquals(
+                    0,
+                    fetch.numRecords(),
+                    "There should be no records in the Fetch as the partition being fetched (" +
+                            completedFetch.partition + ") is 'paused' in the SubscriptionState"
+            );
+            assertFalse(
+                    fetchBuffer.isEmpty(),
+                    "The FetchBuffer queue should not be empty; the CompletedFetch is added to the " +
+                            "FetchBuffer queue by the FetchCollector when it detects a 'paused' " +
+                            "partition (" + completedFetch.partition + ")"
+            );
+            assertNull(
+                    fetchBuffer.nextInLineFetch(),
+                    "The next-in-line CompletedFetch should be null;; the CompletedFetch is added to " +
+                            "the FetchBuffer queue by the FetchCollector when it detects a 'paused' " +
+                            "partition (" + completedFetch.partition + ")"
+            );
         }
     }
 
