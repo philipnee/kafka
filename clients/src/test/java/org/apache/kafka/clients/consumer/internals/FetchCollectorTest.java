@@ -23,9 +23,11 @@ import org.apache.kafka.common.internals.ClusterResourceListeners;
 import org.apache.kafka.common.message.FetchResponseData;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.record.CompressionType;
 import org.apache.kafka.common.record.MemoryRecords;
 import org.apache.kafka.common.record.MemoryRecordsBuilder;
+import org.apache.kafka.common.record.Records;
 import org.apache.kafka.common.record.TimestampType;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
@@ -35,13 +37,18 @@ import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.common.utils.Time;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import static org.apache.kafka.clients.consumer.internals.Utils.createFetchConfig;
 import static org.apache.kafka.clients.consumer.internals.Utils.createFetchMetricsManager;
@@ -129,7 +136,7 @@ public class FetchCollectorTest {
             assertTrue(fetch.isEmpty());
 
             // However, once we read *past* the end of the records in the CompletedFetch, then we will call
-            // drain on it and it will be considered all consumed.
+            // drain on it, and it will be considered all consumed.
             assertTrue(completedFetch.isConsumed());
         }
     }
@@ -250,12 +257,72 @@ public class FetchCollectorTest {
         }
     }
 
-    private CompletedFetch<String, String> completedFetch(int count) {
-        MemoryRecords records = records(0, count, 0);
+
+    /**
+     * Supplies the {@link Arguments} to {@link #testFetchWithMetadataRefreshErrors(Errors)}.
+     */
+    private static Stream<Arguments> handleInitializeErrorSource() {
+        List<Errors> errors = Arrays.asList(
+                Errors.NOT_LEADER_OR_FOLLOWER,
+                Errors.REPLICA_NOT_AVAILABLE,
+                Errors.KAFKA_STORAGE_ERROR,
+                Errors.FENCED_LEADER_EPOCH,
+                Errors.OFFSET_NOT_AVAILABLE,
+                Errors.UNKNOWN_TOPIC_OR_PARTITION,
+                Errors.UNKNOWN_TOPIC_ID,
+                Errors.INCONSISTENT_TOPIC_ID
+        );
+
+        return errors.stream().map(Arguments::of);
+    }
+
+    @ParameterizedTest
+    @MethodSource("handleInitializeErrorSource")
+    public void testFetchWithMetadataRefreshErrors(final Errors error) {
+        buildDependencies(ConsumerConfig.DEFAULT_MAX_POLL_RECORDS);
+
+        subscriptions.assignFromUser(partitions(topicAPartition0));
+        subscriptions.seek(topicAPartition0, 0);
+
+        try (FetchBuffer<String, String> fetchBuffer = new FetchBuffer<>(logContext)) {
+            CompletedFetch<String, String> completedFetch = completedFetch(10, error);
+            fetchBuffer.add(completedFetch);
+            subscriptions.preferredReadReplica(completedFetch.partition, time.milliseconds());
+            assertNotNull(subscriptions.preferredReadReplica(completedFetch.partition, time.milliseconds()));
+            // Fetch the data and validate that we get all the records we want back.
+            Fetch<String, String> fetch = fetchCollector.collectFetch(fetchBuffer);
+            assertTrue(fetch.isEmpty());
+            assertTrue(metadata.updateRequested());
+            assertEquals(Optional.empty(), subscriptions.preferredReadReplica(completedFetch.partition, time.milliseconds()));
+        }
+    }
+
+    private CompletedFetch<String, String> completedFetch(int recordCount) {
+        return completedFetch(recordCount, null);
+    }
+
+    private CompletedFetch<String, String> completedFetch(int count, Errors error) {
+        Records records;
+
+        ByteBuffer allocate = ByteBuffer.allocate(1024);
+        try (MemoryRecordsBuilder builder = MemoryRecords.builder(allocate,
+                CompressionType.NONE,
+                TimestampType.CREATE_TIME,
+                0)) {
+            for (int i = 0; i < count; i++)
+                builder.append(0L, "key".getBytes(), ("value-" + i).getBytes());
+
+            records = builder.build();
+        }
+
         FetchResponseData.PartitionData partitionData = new FetchResponseData.PartitionData()
                 .setPartitionIndex(topicAPartition0.partition())
                 .setHighWatermark(1000)
                 .setRecords(records);
+
+        if (error != null)
+            partitionData.setErrorCode(error.code());
+
         return completedFetch(topicAPartition0, partitionData);
     }
 
@@ -278,13 +345,6 @@ public class FetchCollectorTest {
      */
     private static Set<TopicPartition> partitions(TopicPartition... partitions) {
         return new HashSet<>(Arrays.asList(partitions));
-    }
-
-    private MemoryRecords records(long baseOffset, int count, long firstMessageId) {
-        MemoryRecordsBuilder builder = MemoryRecords.builder(ByteBuffer.allocate(1024), CompressionType.NONE, TimestampType.CREATE_TIME, baseOffset);
-        for (int i = 0; i < count; i++)
-            builder.append(0L, "key".getBytes(), ("value-" + (firstMessageId + i)).getBytes());
-        return builder.build();
     }
 
     private void buildDependencies(int maxPollRecords) {
