@@ -143,7 +143,7 @@ public class FetchCollector<K, V> {
         return fetch;
     }
 
-    Fetch<K, V> fetchRecords(final CompletedFetch<K, V> nextInLineFetch) {
+    private Fetch<K, V> fetchRecords(final CompletedFetch<K, V> nextInLineFetch) {
         final TopicPartition tp = nextInLineFetch.partition;
 
         if (!subscriptions.isAssigned(tp)) {
@@ -205,7 +205,7 @@ public class FetchCollector<K, V> {
     /**
      * Initialize a CompletedFetch object.
      */
-    CompletedFetch<K, V> initialize(final CompletedFetch<K, V> completedFetch) {
+    protected CompletedFetch<K, V> initialize(final CompletedFetch<K, V> completedFetch) {
         final TopicPartition tp = completedFetch.partition;
         final Errors error = Errors.forCode(completedFetch.partitionData.errorCode());
         boolean recordMetrics = true;
@@ -235,7 +235,7 @@ public class FetchCollector<K, V> {
         }
     }
 
-    CompletedFetch<K, V> handleInitializeSuccess(final CompletedFetch<K, V> completedFetch) {
+    private CompletedFetch<K, V> handleInitializeSuccess(final CompletedFetch<K, V> completedFetch) {
         final TopicPartition tp = completedFetch.partition;
         final long fetchOffset = completedFetch.nextFetchOffset();
 
@@ -299,7 +299,7 @@ public class FetchCollector<K, V> {
         return completedFetch;
     }
 
-    void handleInitializeErrors(final CompletedFetch<K, V> completedFetch, final Errors error) {
+    private void handleInitializeErrors(final CompletedFetch<K, V> completedFetch, final Errors error) {
         final TopicPartition tp = completedFetch.partition;
         final long fetchOffset = completedFetch.nextFetchOffset();
 

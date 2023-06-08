@@ -197,7 +197,7 @@ public class FetchCollectorTest {
                 time) {
 
             @Override
-            CompletedFetch<String, String> initialize(final CompletedFetch<String, String> completedFetch) {
+            protected CompletedFetch<String, String> initialize(final CompletedFetch<String, String> completedFetch) {
                 throw expectedException;
             }
         };
