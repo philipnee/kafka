@@ -372,12 +372,28 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
 
     @Override
     public Map<TopicPartition, OffsetAndTimestamp> offsetsForTimes(Map<TopicPartition, Long> timestampsToSearch) {
-        throw new KafkaException("method not implemented");
+        return offsetsForTimes(timestampsToSearch, Duration.ofMillis(defaultApiTimeoutMs));
     }
 
     @Override
     public Map<TopicPartition, OffsetAndTimestamp> offsetsForTimes(Map<TopicPartition, Long> timestampsToSearch, Duration timeout) {
-        throw new KafkaException("method not implemented");
+        // Keeping same argument validation error thrown by the current consumer implementation
+        // to avoid API level changes.
+        requireNonNull(timestampsToSearch, "Timestamps to search cannot be null");
+
+        if (timestampsToSearch.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        final ListOffsetsApplicationEvent listOffsetsEvent = new ListOffsetsApplicationEvent(
+                timestampsToSearch,
+                true);
+
+        // If timeout is set to zero return empty immediately; otherwise try to get the results
+        // and throw timeout exception if it cannot complete in time.
+        if (timeout.toMillis() == 0L)
+            return listOffsetsEvent.emptyResult();
+
+        return eventHandler.addAndGet(listOffsetsEvent, timeout);
     }
 
     @Override
@@ -403,7 +419,10 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
     private Map<TopicPartition, Long> beginningOrEndOffset(Collection<TopicPartition> partitions,
                                                            long timestamp,
                                                            Duration timeout) {
+        // Keeping same argument validation error thrown by the current consumer implementation
+        // to avoid API level changes.
         requireNonNull(partitions, "Partitions cannot be null");
+
         if (partitions.isEmpty()) {
             return Collections.emptyMap();
         }

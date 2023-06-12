@@ -19,6 +19,7 @@ package org.apache.kafka.clients.consumer.internals.events;
 import org.apache.kafka.clients.consumer.OffsetAndTimestamp;
 import org.apache.kafka.common.TopicPartition;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
@@ -52,5 +53,18 @@ public class ListOffsetsApplicationEvent extends CompletableApplicationEvent<Map
         return "ListOffsetsApplicationEvent {" +
                 "timestampsToSearch=" + timestampsToSearch + ", " +
                 "requireTimestamps=" + requireTimestamps + '}';
+    }
+
+    /**
+     * Build result representing that no offsets were found as part of the current event.
+     *
+     * @return Map containing all the partitions the event was trying to get offsets for, and
+     * null {@link OffsetAndTimestamp} as value
+     */
+    public Map<TopicPartition, OffsetAndTimestamp> emptyResult() {
+        HashMap<TopicPartition, OffsetAndTimestamp> offsetsByTimes = new HashMap<>(timestampsToSearch.size());
+        for (Map.Entry<TopicPartition, Long> entry : timestampsToSearch.entrySet())
+            offsetsByTimes.put(entry.getKey(), null);
+        return offsetsByTimes;
     }
 }
