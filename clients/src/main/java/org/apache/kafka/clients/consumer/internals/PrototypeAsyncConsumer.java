@@ -68,6 +68,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -406,11 +407,15 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
         if (partitions.isEmpty()) {
             return Collections.emptyMap();
         }
+        Map<TopicPartition, Long> timestampToSearch =
+                partitions.stream().collect(Collectors.toMap(Function.identity(), tp -> timestamp));
         final ListOffsetsApplicationEvent listOffsetsEvent = new ListOffsetsApplicationEvent(
-                partitions.stream().collect(Collectors.toSet()),
-                timestamp,
+                timestampToSearch,
                 false);
-        return eventHandler.addAndGet(listOffsetsEvent, timeout);
+        Map<TopicPartition, OffsetAndTimestamp> offsetAndTimestampMap =
+                eventHandler.addAndGet(listOffsetsEvent, timeout);
+        return offsetAndTimestampMap.entrySet().stream().collect(Collectors.toMap(e -> e.getKey(),
+                e -> e.getValue().offset()));
     }
 
     @Override

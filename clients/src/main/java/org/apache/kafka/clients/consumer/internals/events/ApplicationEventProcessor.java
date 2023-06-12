@@ -127,7 +127,7 @@ public class ApplicationEventProcessor {
     }
 
     private boolean process(final ListOffsetsApplicationEvent event) {
-        requestManagers.listOffsetsRequestManager.fetchOffsets(event.partitions, event.timestamp,
+        requestManagers.listOffsetsRequestManager.fetchOffsets(event.timestampsToSearch,
                         event.requireTimestamps)
                 .whenComplete((result, error) -> {
                     if (error != null) {
