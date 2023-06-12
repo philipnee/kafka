@@ -23,7 +23,7 @@ import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.utils.Time;
 
 /**
- * Used {@code NodeStatusDetector} to determine the status of a given broker {@link Node}. It's also
+ * Use {@code NodeStatusDetector} to determine the status of a given broker {@link Node}. It's also
  * possible to check for previous authentication errors if the node isn't available.
  *
  * @see ConsumerNetworkClient
@@ -32,7 +32,7 @@ import org.apache.kafka.common.utils.Time;
 public interface NodeStatusDetector {
 
     /**
-     * Check if the code is disconnected and unavailable for immediate reconnection (i.e. if it is in
+     * Check if the node is disconnected and unavailable for immediate reconnection (i.e. if it is in
      * reconnect backoff window following the disconnect).
      *
      * @param node {@link Node} to check for availability
