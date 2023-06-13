@@ -109,11 +109,12 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
         return pollResult;
     }
 
-
     /**
      * Retrieve offsets for the given partitions and timestamp.
      *
      * @param timestampsToSearch Partitions and target timestamps to get offsets for
+     * @param requireTimestamps  True if this should fail with an UnsupportedVersionException if the
+     *                           broker does not support fetching precise timestamps for offsets
      * @return Future containing the map of {@link TopicPartition} and {@link OffsetAndTimestamp}
      * found (offset of the first message whose timestamp is greater than or equals to the target
      * timestamp).The future will complete when the requests responses are received and
@@ -134,11 +135,13 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
                 isolationLevel);
         listOffsetsRequestState.globalResult.whenComplete((result, error) -> {
             metadata.clearTransientTopics();
-            log.debug("Fetch offsets completed for partitions and timestamps {}. Result {}, " +
-                    "error", timestampsToSearch, result, error);
-        }).exceptionally(error -> {
-            log.error(error.getMessage());
-            return null;
+            if (error != null) {
+                log.error("Fetch offsets completed with error for partitions and timestamps {}." +
+                        timestampsToSearch, error);
+            } else {
+                log.debug("Fetch offsets completed successfully for partitions and timestamps {}." +
+                        " Result {}" + timestampsToSearch, result);
+            }
         });
 
         fetchOffsetsByTimes(timestampsToSearch, requireTimestamps, listOffsetsRequestState);

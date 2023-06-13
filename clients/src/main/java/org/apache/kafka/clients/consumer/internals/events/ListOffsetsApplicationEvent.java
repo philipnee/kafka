@@ -21,7 +21,6 @@ import org.apache.kafka.common.TopicPartition;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * Event for retrieving partition offsets by performing a
@@ -32,8 +31,6 @@ import java.util.concurrent.CompletableFuture;
  * or equals to the target timestamp)
  */
 public class ListOffsetsApplicationEvent extends CompletableApplicationEvent<Map<TopicPartition, OffsetAndTimestamp>> {
-    private final CompletableFuture<Map<TopicPartition, OffsetAndTimestamp>> future;
-
     final Map<TopicPartition, Long> timestampsToSearch;
     final boolean requireTimestamps;
 
@@ -41,11 +38,6 @@ public class ListOffsetsApplicationEvent extends CompletableApplicationEvent<Map
         super(Type.LIST_OFFSETS);
         this.timestampsToSearch = timestampToSearch;
         this.requireTimestamps = requireTimestamps;
-        this.future = new CompletableFuture<>();
-    }
-
-    public CompletableFuture<Map<TopicPartition, OffsetAndTimestamp>> future() {
-        return future;
     }
 
     @Override
