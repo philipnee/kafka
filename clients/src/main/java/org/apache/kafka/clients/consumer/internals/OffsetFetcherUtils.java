@@ -296,5 +296,4 @@ class OffsetFetcherUtils {
             this.leaderEpoch = leaderEpoch;
         }
     }
-
 }

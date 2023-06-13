@@ -53,6 +53,8 @@ if ( !versions.scala.contains('-') ) {
   versions["baseScala"] = versions.scala
 }
 
+// When adding, removing or updating dependencies, please also update the LICENSE-binary file accordingly.
+// See https://issues.apache.org/jira/browse/KAFKA-12622 for steps to verify the LICENSE-binary file is correct.
 versions += [
   activation: "1.1.1",
   apacheda: "1.0.2",
@@ -82,7 +84,7 @@ versions += [
   jaxrs: "2.1.1",
   jfreechart: "1.0.0",
   jopt: "5.0.4",
-  jose4j: "0.7.9",
+  jose4j: "0.9.3",
   junit: "5.9.3",
   jqwik: "1.7.2",
   kafka_0100: "0.10.0.1",
@@ -122,7 +124,7 @@ versions += [
   scalaJava8Compat : "1.0.2",
   scoverage: "1.9.3",
   slf4j: "1.7.36",
-  snappy: "1.1.9.1",
+  snappy: "1.1.10.0",
   spotbugs: "4.7.3",
   swaggerAnnotations: "2.2.8",
   swaggerJaxrs2: "2.2.8",
@@ -214,7 +216,7 @@ libs += [
   slf4jApi: "org.slf4j:slf4j-api:$versions.slf4j",
   slf4jlog4j: "org.slf4j:slf4j-log4j12:$versions.slf4j",
   snappy: "org.xerial.snappy:snappy-java:$versions.snappy",
-  swaggerAnnotations: "io.swagger.core.v3:swagger-annotations:$versions.swaggerAnnotations", 
+  swaggerAnnotations: "io.swagger.core.v3:swagger-annotations:$versions.swaggerAnnotations",
   swaggerJaxrs2: "io.swagger.core.v3:swagger-jaxrs2:$versions.swaggerJaxrs2",
   zookeeper: "org.apache.zookeeper:zookeeper:$versions.zookeeper",
   jfreechart: "jfreechart:jfreechart:$versions.jfreechart",
