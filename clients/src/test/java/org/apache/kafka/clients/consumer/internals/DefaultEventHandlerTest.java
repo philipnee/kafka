@@ -16,66 +16,44 @@
  */
 package org.apache.kafka.clients.consumer.internals;
 
-import org.apache.kafka.clients.GroupRebalanceConfig;
 import org.apache.kafka.clients.consumer.internals.events.ApplicationEvent;
-import org.apache.kafka.clients.consumer.internals.events.BackgroundEvent;
+import org.apache.kafka.clients.consumer.internals.events.EventHandler;
 import org.apache.kafka.clients.consumer.internals.events.NoopApplicationEvent;
-import org.apache.kafka.common.serialization.StringDeserializer;
-import org.apache.kafka.common.utils.MockTime;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.Optional;
-import java.util.Properties;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
 
-import static org.apache.kafka.clients.consumer.ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG;
-import static org.apache.kafka.clients.consumer.ConsumerConfig.RETRY_BACKOFF_MS_CONFIG;
-import static org.apache.kafka.clients.consumer.ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
 
 public class DefaultEventHandlerTest {
-    private int sessionTimeoutMs = 1000;
-    private int rebalanceTimeoutMs = 1000;
-    private int heartbeatIntervalMs = 1000;
-    private String groupId = "g-1";
-    private Optional<String> groupInstanceId = Optional.of("g-1");
-    private long retryBackoffMs = 1000;
-    private final Properties properties = new Properties();
-    private GroupRebalanceConfig rebalanceConfig;
+
+    private ConsumerTestBuilder.DefaultEventHandlerTestBuilder testBuilder;
+    private EventHandler eventHandler;
+    private BlockingQueue<ApplicationEvent> applicationEventQueue;
 
     @BeforeEach
     public void setup() {
-        properties.put(KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        properties.put(VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        properties.put(RETRY_BACKOFF_MS_CONFIG, "100");
+        testBuilder = new ConsumerTestBuilder.DefaultEventHandlerTestBuilder();
+        eventHandler = testBuilder.eventHandler;
+        applicationEventQueue = testBuilder.applicationEventQueue;
+    }
 
-        this.rebalanceConfig = new GroupRebalanceConfig(sessionTimeoutMs,
-                rebalanceTimeoutMs,
-                heartbeatIntervalMs,
-                groupId,
-                groupInstanceId,
-                retryBackoffMs,
-                true);
+    @AfterEach
+    public void tearDown() {
+        if (testBuilder != null)
+            testBuilder.close();
     }
 
     @Test
     public void testBasicHandlerOps() {
-        final DefaultBackgroundThread bt = mock(DefaultBackgroundThread.class);
-        final BlockingQueue<ApplicationEvent> aq = new LinkedBlockingQueue<>();
-        final BlockingQueue<BackgroundEvent> bq = new LinkedBlockingQueue<>();
-        final DefaultEventHandler handler = new DefaultEventHandler(new MockTime(), bt, aq, bq);
-        assertTrue(handler.isEmpty());
-        assertFalse(handler.poll().isPresent());
-        handler.add(new NoopApplicationEvent("test"));
-        assertEquals(1, aq.size());
-        handler.close();
-        verify(bt, times(1)).close();
+        assertTrue(eventHandler.isEmpty());
+        assertFalse(eventHandler.poll().isPresent());
+        eventHandler.add(new NoopApplicationEvent("test"));
+        assertEquals(1, applicationEventQueue.size());
+        eventHandler.close();
     }
 }
