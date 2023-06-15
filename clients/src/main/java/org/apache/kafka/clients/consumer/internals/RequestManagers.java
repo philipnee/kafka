@@ -48,7 +48,6 @@ public class RequestManagers implements Closeable {
     public final Optional<CommitRequestManager> commitRequestManager;
     public final ListOffsetsRequestManager listOffsetsRequestManager;
     public final TopicMetadataRequestManager topicMetadataRequestManager;
-
     private final List<Optional<? extends RequestManager>> entries;
     private final IdempotentCloser closer = new IdempotentCloser();
 

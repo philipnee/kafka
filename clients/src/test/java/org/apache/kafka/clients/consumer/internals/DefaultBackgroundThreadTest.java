@@ -56,12 +56,12 @@ public class DefaultBackgroundThreadTest {
     private ConsumerTestBuilder.DefaultBackgroundThreadTestBuilder testBuilder;
     private Time time;
     private ConsumerMetadata metadata;
-    private ApplicationEventProcessor applicationEventProcessor;
-    private TopicMetadataRequestManager topicMetadataRequestManager;
-    private NetworkClientDelegate networkClientDelegate;
+    private NetworkClientDelegate networkClient;
     private BlockingQueue<ApplicationEvent> applicationEventQueue;
+    private ApplicationEventProcessor applicationEventProcessor;
     private CoordinatorRequestManager coordinatorRequestManager;
     private CommitRequestManager commitRequestManager;
+    private TopicMetadataRequestManager topicMetadataRequestManager;
     private DefaultBackgroundThread backgroundThread;
 
     @BeforeEach
@@ -69,12 +69,12 @@ public class DefaultBackgroundThreadTest {
         this.testBuilder = new ConsumerTestBuilder.DefaultBackgroundThreadTestBuilder();
         this.time = testBuilder.time;
         this.metadata = testBuilder.metadata;
-        this.applicationEventProcessor = testBuilder.applicationEventProcessor;
-        this.topicMetadataRequestManager = testBuilder.topicMetadataRequestManager;
-        this.networkClientDelegate = testBuilder.networkClientDelegate;
+        this.networkClient = testBuilder.networkClientDelegate;
         this.applicationEventQueue = testBuilder.applicationEventQueue;
+        this.applicationEventProcessor = testBuilder.applicationEventProcessor;
         this.coordinatorRequestManager = testBuilder.coordinatorRequestManager;
         this.commitRequestManager = testBuilder.commitRequestManager;
+        this.topicMetadataRequestManager = testBuilder.topicMetadataRequestManager;
         this.backgroundThread = testBuilder.backgroundThread;
     }
 
@@ -156,7 +156,7 @@ public class DefaultBackgroundThreadTest {
         backgroundThread.initializeResources();
         backgroundThread.runOnce();
         Mockito.verify(coordinatorRequestManager, times(1)).poll(anyLong());
-        Mockito.verify(networkClientDelegate, times(1)).poll(anyLong(), anyLong());
+        Mockito.verify(networkClient, times(1)).poll(anyLong(), anyLong());
         backgroundThread.close();
     }
 

@@ -105,7 +105,6 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
     private final Time time;
     private final Optional<String> groupId;
     private final Logger log;
-
     private final SubscriptionState subscriptions;
     private final long defaultApiTimeoutMs;
 
@@ -191,12 +190,12 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
                                   SubscriptionState subscriptions,
                                   long defaultApiTimeoutMs) {
         this.logContext = logContext;
-        this.log = logContext.logger(PrototypeAsyncConsumer.class);
-        this.time = time;
-        this.eventHandler = eventHandler;
-        this.groupId = groupId;
+        this.log = logContext.logger(getClass());
         this.subscriptions = subscriptions;
+        this.time = time;
+        this.groupId = groupId;
         this.defaultApiTimeoutMs = defaultApiTimeoutMs;
+        this.eventHandler = eventHandler;
     }
 
     /**
