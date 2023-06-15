@@ -87,10 +87,9 @@ public class DefaultBackgroundThreadTest {
 
     @Test
     public void testStartupAndTearDown() throws InterruptedException {
+        backgroundThread.start();
         assertFalse(backgroundThread.isRunning());
 
-        KafkaThread ioThread = new KafkaThread(PrototypeAsyncConsumer.NETWORK_THREAD_PREFIX, backgroundThread, true);
-        ioThread.start();
         // There's a nonzero amount of time between starting the thread and having it
         // begin to execute our code. Wait for a bit before checking...
         int maxWaitMs = 1000;
@@ -109,6 +108,7 @@ public class DefaultBackgroundThreadTest {
         when(commitRequestManager.poll(anyLong())).thenReturn(mockPollCommitResult());
         ApplicationEvent e = new NoopApplicationEvent("noop event");
         this.applicationEventQueue.add(e);
+        backgroundThread.initializeResources();
         backgroundThread.runOnce();
         verify(applicationEventProcessor, times(1)).process(e);
         backgroundThread.close();
@@ -120,6 +120,7 @@ public class DefaultBackgroundThreadTest {
         when(commitRequestManager.poll(anyLong())).thenReturn(mockPollCommitResult());
         ApplicationEvent e = new MetadataUpdateApplicationEvent(time.milliseconds());
         this.applicationEventQueue.add(e);
+        backgroundThread.initializeResources();
         backgroundThread.runOnce();
         verify(metadata).requestUpdateForNewTopics();
         backgroundThread.close();
@@ -131,6 +132,7 @@ public class DefaultBackgroundThreadTest {
         when(commitRequestManager.poll(anyLong())).thenReturn(mockPollCommitResult());
         ApplicationEvent e = new CommitApplicationEvent(new HashMap<>());
         this.applicationEventQueue.add(e);
+        backgroundThread.initializeResources();
         backgroundThread.runOnce();
         verify(applicationEventProcessor).process(any(CommitApplicationEvent.class));
         backgroundThread.close();
@@ -141,6 +143,7 @@ public class DefaultBackgroundThreadTest {
         Map<TopicPartition, Long> timestamps = Collections.singletonMap(new TopicPartition("topic1", 1), 5L);
         ApplicationEvent e = new ListOffsetsApplicationEvent(timestamps, true);
         this.applicationEventQueue.add(e);
+        backgroundThread.initializeResources();
         backgroundThread.runOnce();
         verify(applicationEventProcessor).process(any(ListOffsetsApplicationEvent.class));
         assertTrue(applicationEventQueue.isEmpty());
@@ -151,6 +154,7 @@ public class DefaultBackgroundThreadTest {
     void testFindCoordinator() {
         when(coordinatorRequestManager.poll(anyLong())).thenReturn(mockPollCoordinatorResult());
         when(commitRequestManager.poll(anyLong())).thenReturn(mockPollCommitResult());
+        backgroundThread.initializeResources();
         backgroundThread.runOnce();
         Mockito.verify(coordinatorRequestManager, times(1)).poll(anyLong());
         Mockito.verify(networkClientDelegate, times(1)).poll(anyLong(), anyLong());
@@ -161,6 +165,7 @@ public class DefaultBackgroundThreadTest {
     void testFetchTopicMetadata() {
         when(this.topicMetadataRequestManager.requestTopicMetadata(Optional.of(anyString()))).thenReturn(new CompletableFuture<>());
         this.applicationEventQueue.add(new TopicMetadataApplicationEvent("topic"));
+        backgroundThread.initializeResources();
         backgroundThread.runOnce();
         verify(applicationEventProcessor).process(any(TopicMetadataApplicationEvent.class));
         backgroundThread.close();
@@ -172,6 +177,7 @@ public class DefaultBackgroundThreadTest {
         NetworkClientDelegate.PollResult success = new NetworkClientDelegate.PollResult(
                 10,
                 Collections.singletonList(findCoordinatorUnsentRequest()));
+        backgroundThread.initializeResources();
         assertEquals(10, backgroundThread.handlePollResult(success));
 
         NetworkClientDelegate.PollResult failure = new NetworkClientDelegate.PollResult(

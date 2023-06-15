@@ -20,6 +20,7 @@ import org.apache.kafka.clients.consumer.internals.events.ApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.ApplicationEventProcessor;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.errors.WakeupException;
+import org.apache.kafka.common.utils.KafkaThread;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
@@ -40,21 +41,22 @@ import java.util.function.Supplier;
  * It holds a reference to the {@link SubscriptionState}, which is
  * initialized by the polling thread.
  */
-public class DefaultBackgroundThread implements Runnable, Closeable {
+public class DefaultBackgroundThread extends KafkaThread implements Closeable {
 
     private static final long MAX_POLL_TIMEOUT_MS = 5000;
+    private static final String BACKGROUND_THREAD_NAME = "consumer_background_thread";
     private final Time time;
     private final Logger log;
     private final BlockingQueue<ApplicationEvent> applicationEventQueue;
     private final Supplier<ApplicationEventProcessor> applicationEventProcessorSupplier;
     private final Supplier<NetworkClientDelegate> networkClientDelegateSupplier;
     private final Supplier<RequestManagers> requestManagersSupplier;
-    private volatile boolean running;
-    private final IdempotentCloser closer = new IdempotentCloser();
-
+    // empty if groupId is null
     private ApplicationEventProcessor applicationEventProcessor;
     private NetworkClientDelegate networkClientDelegate;
     private RequestManagers requestManagers;
+    private volatile boolean running;
+    private final IdempotentCloser closer = new IdempotentCloser();
 
     public DefaultBackgroundThread(Time time,
                                    LogContext logContext,
@@ -62,6 +64,7 @@ public class DefaultBackgroundThread implements Runnable, Closeable {
                                    Supplier<ApplicationEventProcessor> applicationEventProcessorSupplier,
                                    Supplier<NetworkClientDelegate> networkClientDelegateSupplier,
                                    Supplier<RequestManagers> requestManagersSupplier) {
+        super(BACKGROUND_THREAD_NAME, true);
         this.time = time;
         this.log = logContext.logger(DefaultBackgroundThread.class);
         this.applicationEventQueue = applicationEventQueue;

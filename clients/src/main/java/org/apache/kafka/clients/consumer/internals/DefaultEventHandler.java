@@ -23,7 +23,6 @@ import org.apache.kafka.clients.consumer.internals.events.BackgroundEvent;
 import org.apache.kafka.clients.consumer.internals.events.CompletableApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.EventHandler;
 import org.apache.kafka.common.KafkaException;
-import org.apache.kafka.common.utils.KafkaThread;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
 import org.slf4j.Logger;
@@ -47,7 +46,6 @@ public class DefaultEventHandler<K, V> implements EventHandler {
     private final BlockingQueue<ApplicationEvent> applicationEventQueue;
     private final BlockingQueue<BackgroundEvent> backgroundEventQueue;
     private final DefaultBackgroundThread backgroundThread;
-    private final KafkaThread ioThread;
     private final IdempotentCloser closer = new IdempotentCloser();
 
     public DefaultEventHandler(final Time time,
@@ -68,9 +66,7 @@ public class DefaultEventHandler<K, V> implements EventHandler {
                 applicationEventProcessorSupplier,
                 networkClientDelegateSupplier,
                 requestManagersSupplier);
-        String ioThreadName = NETWORK_THREAD_PREFIX + " | " + config.getString(ConsumerConfig.CLIENT_ID_CONFIG);
-        this.ioThread = new KafkaThread(ioThreadName, this.backgroundThread, true);
-        this.ioThread.start();
+        this.backgroundThread.start();
     }
 
     @Override
@@ -112,15 +108,6 @@ public class DefaultEventHandler<K, V> implements EventHandler {
                             throw new IllegalArgumentException("The timeout cannot be negative.");
 
                         backgroundThread.close();
-
-                        if (this.ioThread != null) {
-                            try {
-                                this.ioThread.join(timeoutMs);
-                            } catch (InterruptedException t) {
-                                log.error("Interrupted while joining ioThread", t);
-                            }
-                        }
-
                         log.info("The default consumer event handler was closed");
                     } catch (final Exception e) {
                         throw new KafkaException(e);

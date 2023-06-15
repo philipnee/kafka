@@ -161,7 +161,6 @@ public class ConsumerTestBuilder implements Closeable {
                     applicationEventProcessorSupplier,
                     networkClientDelegateSupplier,
                     requestManagersSupplier);
-            this.backgroundThread.initializeResources();
         }
 
         @Override
