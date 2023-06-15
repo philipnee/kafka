@@ -111,7 +111,9 @@ public class PrototypeAsyncConsumerTest {
         doReturn(future).when(consumer).commit(offsets);
         consumer.commitAsync(offsets, null);
         future.complete(null);
-        TestUtils.waitForCondition(future::isDone, 2000, "commit future should complete");
+        TestUtils.waitForCondition(() -> future.isDone(),
+                2000,
+                "commit future should complete");
 
         assertFalse(future.isCompletedExceptionally());
     }
@@ -133,6 +135,7 @@ public class PrototypeAsyncConsumerTest {
 
     @Test
     public void testCommitted() {
+        Set<TopicPartition> mockTopicPartitions = mockTopicPartitionOffset().keySet();
         MockedConstruction.MockInitializer<OffsetFetchApplicationEvent> mockInitializer = (mock, ctx) -> {
             // Make sure that get returns map but also that the type of the event returns something so that
             // the DefaultEventProcessor doesn't choke on a null type.
@@ -140,10 +143,9 @@ public class PrototypeAsyncConsumerTest {
             when(mock.type()).thenReturn(ApplicationEvent.Type.FETCH_COMMITTED_OFFSET);
         };
 
-        try (MockedConstruction<OffsetFetchApplicationEvent> construction = mockConstruction(OffsetFetchApplicationEvent.class, mockInitializer)) {
-            Set<TopicPartition> mockTopicPartitions = mockTopicPartitionOffset().keySet();
+        try (MockedConstruction<OffsetFetchApplicationEvent> mockedCtor = mockConstruction(OffsetFetchApplicationEvent.class, mockInitializer)) {
             assertDoesNotThrow(() -> consumer.committed(mockTopicPartitions, Duration.ofMillis(1)));
-            List<OffsetFetchApplicationEvent> constructedEvents = construction.constructed();
+            List<OffsetFetchApplicationEvent> constructedEvents = mockedCtor.constructed();
             assertNotNull(constructedEvents);
             assertEquals(1, constructedEvents.size());
             OffsetFetchApplicationEvent event = constructedEvents.get(0);
@@ -185,7 +187,8 @@ public class PrototypeAsyncConsumerTest {
 
     @Test
     public void testBeginningOffsetsFailsIfNullPartitions() {
-        assertThrows(NullPointerException.class, () -> consumer.beginningOffsets(null, Duration.ofMillis(1)));
+        assertThrows(NullPointerException.class, () -> consumer.beginningOffsets(null,
+                Duration.ofMillis(1)));
     }
 
     @Test

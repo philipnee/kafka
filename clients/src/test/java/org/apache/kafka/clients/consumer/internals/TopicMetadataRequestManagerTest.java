@@ -112,8 +112,9 @@ public class TopicMetadataRequestManagerTest {
     @Test
     public void testSendingTheSameRequest() {
         final String topic = "hello";
-        CompletableFuture<Map<String, List<PartitionInfo>>> future1 = topicMetadataRequestManager.requestTopicMetadata(Optional.of(topic));
-        CompletableFuture<Map<String, List<PartitionInfo>>> future2 = topicMetadataRequestManager.requestTopicMetadata(Optional.of(topic));
+        CompletableFuture<Map<String, List<PartitionInfo>>> future = topicMetadataRequestManager.requestTopicMetadata(Optional.of(topic));
+        CompletableFuture<Map<String, List<PartitionInfo>>> future2 =
+            topicMetadataRequestManager.requestTopicMetadata(Optional.of(topic));
         this.time.sleep(100);
         NetworkClientDelegate.PollResult res = this.topicMetadataRequestManager.poll(this.time.milliseconds());
         assertEquals(1, res.unsentRequests.size());
@@ -121,8 +122,8 @@ public class TopicMetadataRequestManagerTest {
         NetworkClientDelegate.UnsentRequest request = res.unsentRequests.get(0);
         request.future().complete(buildTopicMetadataClientResponse(request, topic, Errors.NONE));
 
-        assertTrue(future1.isDone());
-        assertFalse(future1.isCompletedExceptionally());
+        assertTrue(future.isDone());
+        assertFalse(future.isCompletedExceptionally());
         assertTrue(future2.isDone());
         assertFalse(future2.isCompletedExceptionally());
     }
