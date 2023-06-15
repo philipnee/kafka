@@ -112,9 +112,9 @@ public class TopicMetadataRequestManagerTest {
     @Test
     public void testSendingTheSameRequest() {
         final String topic = "hello";
-        CompletableFuture<Map<String, List<PartitionInfo>>> future = topicMetadataRequestManager.requestTopicMetadata(Optional.of(topic));
+        CompletableFuture<Map<String, List<PartitionInfo>>> future = this.topicMetadataRequestManager.requestTopicMetadata(Optional.of(topic));
         CompletableFuture<Map<String, List<PartitionInfo>>> future2 =
-            topicMetadataRequestManager.requestTopicMetadata(Optional.of(topic));
+            this.topicMetadataRequestManager.requestTopicMetadata(Optional.of(topic));
         this.time.sleep(100);
         NetworkClientDelegate.PollResult res = this.topicMetadataRequestManager.poll(this.time.milliseconds());
         assertEquals(1, res.unsentRequests.size());

@@ -32,14 +32,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class DefaultEventHandlerTest {
 
     private ConsumerTestBuilder.DefaultEventHandlerTestBuilder testBuilder;
-    private EventHandler eventHandler;
-    private BlockingQueue<ApplicationEvent> applicationEventQueue;
+    private EventHandler handler;
+    private BlockingQueue<ApplicationEvent> aq;
 
     @BeforeEach
     public void setup() {
         testBuilder = new ConsumerTestBuilder.DefaultEventHandlerTestBuilder();
-        eventHandler = testBuilder.eventHandler;
-        applicationEventQueue = testBuilder.applicationEventQueue;
+        handler = testBuilder.eventHandler;
+        aq = testBuilder.applicationEventQueue;
     }
 
     @AfterEach
@@ -50,10 +50,9 @@ public class DefaultEventHandlerTest {
 
     @Test
     public void testBasicHandlerOps() {
-        assertTrue(eventHandler.isEmpty());
-        assertFalse(eventHandler.poll().isPresent());
-        eventHandler.add(new NoopApplicationEvent("test"));
-        assertEquals(1, applicationEventQueue.size());
-        eventHandler.close();
+        assertTrue(handler.isEmpty());
+        assertFalse(handler.poll().isPresent());
+        handler.add(new NoopApplicationEvent("test"));
+        assertEquals(1, aq.size());
     }
 }

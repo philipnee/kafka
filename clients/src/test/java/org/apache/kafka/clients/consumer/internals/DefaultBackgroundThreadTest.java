@@ -63,7 +63,6 @@ public class DefaultBackgroundThreadTest {
     private BlockingQueue<ApplicationEvent> applicationEventQueue;
     private CoordinatorRequestManager coordinatorRequestManager;
     private CommitRequestManager commitRequestManager;
-    private RequestManagers requestManagers;
     private DefaultBackgroundThread backgroundThread;
 
     @BeforeEach
@@ -77,7 +76,6 @@ public class DefaultBackgroundThreadTest {
         this.applicationEventQueue = testBuilder.applicationEventQueue;
         this.coordinatorRequestManager = testBuilder.coordinatorRequestManager;
         this.commitRequestManager = testBuilder.commitRequestManager;
-        this.requestManagers = testBuilder.requestManagers;
         this.backgroundThread = testBuilder.backgroundThread;
     }
 
@@ -107,12 +105,10 @@ public class DefaultBackgroundThreadTest {
 
     @Test
     public void testApplicationEvent() {
-        CoordinatorRequestManager coordinatorRequestManager = requestManagers.coordinatorRequestManager.get();
-        CommitRequestManager commitRequestManager = requestManagers.commitRequestManager.get();
         when(coordinatorRequestManager.poll(anyLong())).thenReturn(mockPollCoordinatorResult());
         when(commitRequestManager.poll(anyLong())).thenReturn(mockPollCommitResult());
         ApplicationEvent e = new NoopApplicationEvent("noop event");
-        applicationEventQueue.add(e);
+        this.applicationEventQueue.add(e);
         backgroundThread.runOnce();
         verify(applicationEventProcessor, times(1)).process(e);
         backgroundThread.close();
@@ -153,8 +149,6 @@ public class DefaultBackgroundThreadTest {
 
     @Test
     void testFindCoordinator() {
-        CoordinatorRequestManager coordinatorRequestManager = requestManagers.coordinatorRequestManager.get();
-        CommitRequestManager commitRequestManager = requestManagers.commitRequestManager.get();
         when(coordinatorRequestManager.poll(anyLong())).thenReturn(mockPollCoordinatorResult());
         when(commitRequestManager.poll(anyLong())).thenReturn(mockPollCommitResult());
         backgroundThread.runOnce();
