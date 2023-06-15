@@ -57,10 +57,10 @@ public class DefaultBackgroundThreadTest {
     private Time time;
     private ConsumerMetadata metadata;
     private NetworkClientDelegate networkClient;
-    private BlockingQueue<ApplicationEvent> applicationEventQueue;
+    private BlockingQueue<ApplicationEvent> applicationEventsQueue;
     private ApplicationEventProcessor applicationEventProcessor;
-    private CoordinatorRequestManager coordinatorRequestManager;
-    private CommitRequestManager commitRequestManager;
+    private CoordinatorRequestManager coordinatorManager;
+    private CommitRequestManager commitManager;
     private TopicMetadataRequestManager topicMetadataRequestManager;
     private DefaultBackgroundThread backgroundThread;
 
@@ -70,10 +70,10 @@ public class DefaultBackgroundThreadTest {
         this.time = testBuilder.time;
         this.metadata = testBuilder.metadata;
         this.networkClient = testBuilder.networkClientDelegate;
-        this.applicationEventQueue = testBuilder.applicationEventQueue;
+        this.applicationEventsQueue = testBuilder.applicationEventQueue;
         this.applicationEventProcessor = testBuilder.applicationEventProcessor;
-        this.coordinatorRequestManager = testBuilder.coordinatorRequestManager;
-        this.commitRequestManager = testBuilder.commitRequestManager;
+        this.coordinatorManager = testBuilder.coordinatorRequestManager;
+        this.commitManager = testBuilder.commitRequestManager;
         this.topicMetadataRequestManager = testBuilder.topicMetadataRequestManager;
         this.backgroundThread = testBuilder.backgroundThread;
     }
@@ -103,10 +103,10 @@ public class DefaultBackgroundThreadTest {
 
     @Test
     public void testApplicationEvent() {
-        when(coordinatorRequestManager.poll(anyLong())).thenReturn(mockPollCoordinatorResult());
-        when(commitRequestManager.poll(anyLong())).thenReturn(mockPollCommitResult());
+        when(coordinatorManager.poll(anyLong())).thenReturn(mockPollCoordinatorResult());
+        when(commitManager.poll(anyLong())).thenReturn(mockPollCommitResult());
         ApplicationEvent e = new NoopApplicationEvent("noop event");
-        this.applicationEventQueue.add(e);
+        this.applicationEventsQueue.add(e);
         backgroundThread.initializeResources();
         backgroundThread.runOnce();
         verify(applicationEventProcessor, times(1)).process(e);
@@ -115,10 +115,10 @@ public class DefaultBackgroundThreadTest {
 
     @Test
     public void testMetadataUpdateEvent() {
-        when(coordinatorRequestManager.poll(anyLong())).thenReturn(mockPollCoordinatorResult());
-        when(commitRequestManager.poll(anyLong())).thenReturn(mockPollCommitResult());
+        when(coordinatorManager.poll(anyLong())).thenReturn(mockPollCoordinatorResult());
+        when(commitManager.poll(anyLong())).thenReturn(mockPollCommitResult());
         ApplicationEvent e = new MetadataUpdateApplicationEvent(time.milliseconds());
-        this.applicationEventQueue.add(e);
+        this.applicationEventsQueue.add(e);
         backgroundThread.initializeResources();
         backgroundThread.runOnce();
         verify(metadata).requestUpdateForNewTopics();
@@ -127,10 +127,10 @@ public class DefaultBackgroundThreadTest {
 
     @Test
     public void testCommitEvent() {
-        when(coordinatorRequestManager.poll(anyLong())).thenReturn(mockPollCoordinatorResult());
-        when(commitRequestManager.poll(anyLong())).thenReturn(mockPollCommitResult());
+        when(coordinatorManager.poll(anyLong())).thenReturn(mockPollCoordinatorResult());
+        when(commitManager.poll(anyLong())).thenReturn(mockPollCommitResult());
         ApplicationEvent e = new CommitApplicationEvent(new HashMap<>());
-        this.applicationEventQueue.add(e);
+        this.applicationEventsQueue.add(e);
         backgroundThread.initializeResources();
         backgroundThread.runOnce();
         verify(applicationEventProcessor).process(any(CommitApplicationEvent.class));
@@ -141,21 +141,21 @@ public class DefaultBackgroundThreadTest {
     public void testListOffsetsEventIsProcessed() {
         Map<TopicPartition, Long> timestamps = Collections.singletonMap(new TopicPartition("topic1", 1), 5L);
         ApplicationEvent e = new ListOffsetsApplicationEvent(timestamps, true);
-        this.applicationEventQueue.add(e);
+        this.applicationEventsQueue.add(e);
         backgroundThread.initializeResources();
         backgroundThread.runOnce();
         verify(applicationEventProcessor).process(any(ListOffsetsApplicationEvent.class));
-        assertTrue(applicationEventQueue.isEmpty());
+        assertTrue(applicationEventsQueue.isEmpty());
         backgroundThread.close();
     }
 
     @Test
     void testFindCoordinator() {
-        when(coordinatorRequestManager.poll(anyLong())).thenReturn(mockPollCoordinatorResult());
-        when(commitRequestManager.poll(anyLong())).thenReturn(mockPollCommitResult());
+        when(coordinatorManager.poll(anyLong())).thenReturn(mockPollCoordinatorResult());
+        when(commitManager.poll(anyLong())).thenReturn(mockPollCommitResult());
         backgroundThread.initializeResources();
         backgroundThread.runOnce();
-        Mockito.verify(coordinatorRequestManager, times(1)).poll(anyLong());
+        Mockito.verify(coordinatorManager, times(1)).poll(anyLong());
         Mockito.verify(networkClient, times(1)).poll(anyLong(), anyLong());
         backgroundThread.close();
     }
@@ -163,7 +163,7 @@ public class DefaultBackgroundThreadTest {
     @Test
     void testFetchTopicMetadata() {
         when(this.topicMetadataRequestManager.requestTopicMetadata(Optional.of(anyString()))).thenReturn(new CompletableFuture<>());
-        this.applicationEventQueue.add(new TopicMetadataApplicationEvent("topic"));
+        this.applicationEventsQueue.add(new TopicMetadataApplicationEvent("topic"));
         backgroundThread.initializeResources();
         backgroundThread.runOnce();
         verify(applicationEventProcessor).process(any(TopicMetadataApplicationEvent.class));
