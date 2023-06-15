@@ -68,7 +68,7 @@ public class PrototypeAsyncConsumerTest {
 
     private static final Optional<String> DEFAULT_GROUP_ID = Optional.of("group.id");
 
-    private ConsumerTestBuilder.PrototypeAsyncConsumerTestBuilder consumerBuilder;
+    private ConsumerTestBuilder.PrototypeAsyncConsumerTestBuilder testBuilder;
     private EventHandler eventHandler;
     private PrototypeAsyncConsumer<String, String> consumer;
 
@@ -79,19 +79,19 @@ public class PrototypeAsyncConsumerTest {
 
     @AfterEach
     public void cleanup() {
-        if (consumer != null)
-            consumer.close();
+        if (testBuilder != null)
+            testBuilder.close();
     }
 
     private void setup(Optional<String> groupIdOpt) {
-        consumerBuilder = new ConsumerTestBuilder.PrototypeAsyncConsumerTestBuilder(groupIdOpt);
-        eventHandler = consumerBuilder.eventHandler;
-        consumer = consumerBuilder.consumer;
+        testBuilder = new ConsumerTestBuilder.PrototypeAsyncConsumerTestBuilder(groupIdOpt);
+        eventHandler = testBuilder.eventHandler;
+        consumer = testBuilder.consumer;
     }
 
     @Test
     public void testSuccessfulStartupShutdown() {
-        assertDoesNotThrow(() -> consumerBuilder.consumer.close());
+        assertDoesNotThrow(() -> consumer.close());
     }
 
     @Test
