@@ -92,9 +92,7 @@ public class RequestManagers implements Closeable {
                     });
                     log.debug("RequestManagers has been closed");
                 },
-                () -> {
-                    log.debug("RequestManagers was already closed");
-                });
+                () -> log.debug("RequestManagers was already closed"));
 
     }
 
@@ -102,15 +100,14 @@ public class RequestManagers implements Closeable {
      * Creates a {@link Supplier} for deferred creation during invocation by
      * {@link org.apache.kafka.clients.consumer.internals.DefaultBackgroundThread}.
      */
-    public static Supplier<RequestManagers> creator(final Time time,
-                                                                 final LogContext logContext,
-                                                                 final BlockingQueue<BackgroundEvent> backgroundEventQueue,
-                                                                 final ConsumerMetadata metadata,
-                                                                 final SubscriptionState subscriptions,
-                                                                 final ConsumerConfig config,
-                                                                 final GroupRebalanceConfig groupRebalanceConfig,
-                                                                 final ApiVersions apiVersions,
-                                                                 final Supplier<NetworkClientDelegate> networkClientDelegateSupplier) {
+    public static Supplier<RequestManagers> supplier(final Time time,
+                                                     final LogContext logContext,
+                                                     final BlockingQueue<BackgroundEvent> backgroundEventQueue,
+                                                     final ConsumerMetadata metadata,
+                                                     final SubscriptionState subscriptions,
+                                                     final ConsumerConfig config,
+                                                     final GroupRebalanceConfig groupRebalanceConfig,
+                                                     final ApiVersions apiVersions) {
         return new CachedSupplier<RequestManagers>() {
             @Override
             protected RequestManagers create() {
@@ -123,8 +120,8 @@ public class RequestManagers implements Closeable {
                         apiVersions,
                         logContext);
                 final TopicMetadataRequestManager topicMetadata = new TopicMetadataRequestManager(logContext, config);
-                final CoordinatorRequestManager coordinator;
-                final CommitRequestManager commit;
+                CoordinatorRequestManager coordinator = null;
+                CommitRequestManager commit = null;
 
                 if (groupRebalanceConfig != null && groupRebalanceConfig.groupId != null) {
                     final long retryBackoffMs = config.getLong(ConsumerConfig.RETRY_BACKOFF_MS_CONFIG);
@@ -135,9 +132,6 @@ public class RequestManagers implements Closeable {
                             errorEventHandler,
                             groupState.groupId);
                     commit = new CommitRequestManager(time, logContext, subscriptions, config, coordinator, groupState);
-                } else {
-                    coordinator = null;
-                    commit = null;
                 }
 
                 return new RequestManagers(logContext,

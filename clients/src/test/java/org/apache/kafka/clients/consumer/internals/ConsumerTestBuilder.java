@@ -151,10 +151,10 @@ public class ConsumerTestBuilder implements Closeable {
 
     public static class DefaultBackgroundThreadTestBuilder extends ConsumerTestBuilder {
 
-        final DefaultBackgroundThread<String, String> backgroundThread;
+        final DefaultBackgroundThread backgroundThread;
 
         public DefaultBackgroundThreadTestBuilder() {
-            this.backgroundThread = new DefaultBackgroundThread<>(
+            this.backgroundThread = new DefaultBackgroundThread(
                     time,
                     logContext,
                     applicationEventQueue,
@@ -197,22 +197,13 @@ public class ConsumerTestBuilder implements Closeable {
         final PrototypeAsyncConsumer<String, String> consumer;
 
         public PrototypeAsyncConsumerTestBuilder(Optional<String> groupIdOpt) {
-            FetchCollector<String, String> fetchCollector = new FetchCollector<>(logContext,
-                    metadata,
-                    subscriptions,
-                    fetchConfig,
-                    metricsManager,
-                    time);
             this.consumer = spy(new PrototypeAsyncConsumer<>(logContext,
                     time,
                     metadata,
                     eventHandler,
                     groupIdOpt,
-                    new ConsumerInterceptors<>(Collections.emptyList()),
                     subscriptions,
-                    3000,
-                    new FetchBuffer<>(logContext),
-                    fetchCollector));
+                    3000));
         }
 
         @Override

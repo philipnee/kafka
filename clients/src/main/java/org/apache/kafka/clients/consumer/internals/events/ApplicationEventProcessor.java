@@ -162,10 +162,10 @@ public class ApplicationEventProcessor {
      * Creates a {@link Supplier} for deferred creation during invocation by
      * {@link org.apache.kafka.clients.consumer.internals.DefaultBackgroundThread}.
      */
-    public static Supplier<ApplicationEventProcessor> creator(final LogContext logContext,
-                                                              final ConsumerMetadata metadata,
-                                                              final BlockingQueue<BackgroundEvent> backgroundEventQueue,
-                                                              final Supplier<RequestManagers> requestManagersSupplier) {
+    public static Supplier<ApplicationEventProcessor> supplier(final LogContext logContext,
+                                                               final ConsumerMetadata metadata,
+                                                               final BlockingQueue<BackgroundEvent> backgroundEventQueue,
+                                                               final Supplier<RequestManagers> requestManagersSupplier) {
         return new CachedSupplier<ApplicationEventProcessor>() {
             @Override
             protected ApplicationEventProcessor create() {

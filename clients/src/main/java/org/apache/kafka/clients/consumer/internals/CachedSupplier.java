@@ -21,6 +21,11 @@ import java.util.function.Supplier;
 /**
  * Simple {@link Supplier} that caches the initial creation of the object and stores it for later calls
  * to {@link #get()}.
+ *
+ * <p/>
+ *
+ * <em>Note</em>: this class is not thread safe! Use only in contexts which are designed/guaranteed to be
+ * single-threaded.
  */
 public abstract class CachedSupplier<T> implements Supplier<T> {
 

@@ -40,7 +40,7 @@ import java.util.function.Supplier;
  * It holds a reference to the {@link SubscriptionState}, which is
  * initialized by the polling thread.
  */
-public class DefaultBackgroundThread<K, V> implements Runnable, Closeable {
+public class DefaultBackgroundThread implements Runnable, Closeable {
 
     private static final long MAX_POLL_TIMEOUT_MS = 5000;
     private final Time time;
@@ -157,8 +157,6 @@ public class DefaultBackgroundThread<K, V> implements Runnable, Closeable {
             Utils.closeQuietly(requestManagers, "Request managers client");
             Utils.closeQuietly(networkClientDelegate, "network client utils");
             log.debug("Closed the consumer background thread");
-        }, () -> {
-            log.warn("The consumer background thread was previously closed");
-        });
+        }, () -> log.warn("The consumer background thread was previously closed"));
     }
 }

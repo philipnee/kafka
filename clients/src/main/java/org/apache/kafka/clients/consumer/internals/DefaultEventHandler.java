@@ -46,7 +46,7 @@ public class DefaultEventHandler<K, V> implements EventHandler {
     private final Time time;
     private final BlockingQueue<ApplicationEvent> applicationEventQueue;
     private final BlockingQueue<BackgroundEvent> backgroundEventQueue;
-    private final DefaultBackgroundThread<K, V> backgroundThread;
+    private final DefaultBackgroundThread backgroundThread;
     private final KafkaThread ioThread;
     private final IdempotentCloser closer = new IdempotentCloser();
 
@@ -62,7 +62,7 @@ public class DefaultEventHandler<K, V> implements EventHandler {
         this.time = time;
         this.applicationEventQueue = applicationEventQueue;
         this.backgroundEventQueue = backgroundEventQueue;
-        this.backgroundThread = new DefaultBackgroundThread<>(time,
+        this.backgroundThread = new DefaultBackgroundThread(time,
                 logContext,
                 applicationEventQueue,
                 applicationEventProcessorSupplier,
@@ -126,9 +126,7 @@ public class DefaultEventHandler<K, V> implements EventHandler {
                         throw new KafkaException(e);
                     }
                 },
-                () -> {
-                    log.info("The default consumer event handler was already closed");
-                });
+                () -> log.info("The default consumer event handler was already closed"));
 
     }
 }

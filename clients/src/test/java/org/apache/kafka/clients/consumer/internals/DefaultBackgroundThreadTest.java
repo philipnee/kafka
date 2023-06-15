@@ -64,7 +64,7 @@ public class DefaultBackgroundThreadTest {
     private CoordinatorRequestManager coordinatorRequestManager;
     private CommitRequestManager commitRequestManager;
     private RequestManagers requestManagers;
-    private DefaultBackgroundThread<String, String> backgroundThread;
+    private DefaultBackgroundThread backgroundThread;
 
     @BeforeEach
     public void setup() {

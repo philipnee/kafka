@@ -287,13 +287,13 @@ public class NetworkClientDelegate implements NodeStatusDetector, AutoCloseable 
      * Creates a {@link Supplier} for deferred creation during invocation by
      * {@link org.apache.kafka.clients.consumer.internals.DefaultBackgroundThread}.
      */
-    public static Supplier<NetworkClientDelegate> creator(final Time time,
-                                                          final LogContext logContext,
-                                                          final ConsumerMetadata metadata,
-                                                          final ConsumerConfig config,
-                                                          final ApiVersions apiVersions,
-                                                          final Metrics metrics,
-                                                          final FetchMetricsManager fetchMetricsManager) {
+    public static Supplier<NetworkClientDelegate> supplier(final Time time,
+                                                           final LogContext logContext,
+                                                           final ConsumerMetadata metadata,
+                                                           final ConsumerConfig config,
+                                                           final ApiVersions apiVersions,
+                                                           final Metrics metrics,
+                                                           final FetchMetricsManager fetchMetricsManager) {
         return new CachedSupplier<NetworkClientDelegate>() {
             @Override
             protected NetworkClientDelegate create() {

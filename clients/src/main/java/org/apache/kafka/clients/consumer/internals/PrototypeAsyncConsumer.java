@@ -81,7 +81,6 @@ import java.util.stream.Collectors;
 import static java.util.Objects.requireNonNull;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG;
-import static org.apache.kafka.clients.consumer.internals.Utils.createFetchConfig;
 import static org.apache.kafka.clients.consumer.internals.Utils.createFetchMetricsManager;
 import static org.apache.kafka.clients.consumer.internals.Utils.createLogContext;
 import static org.apache.kafka.clients.consumer.internals.Utils.createMetrics;
@@ -104,17 +103,14 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
     static final String NETWORK_THREAD_PREFIX = "kafka-consumer-network-thread";
 
     private final LogContext logContext;
-    private final Logger log;
     private final Time time;
     private final ConsumerMetadata metadata;
     private final EventHandler eventHandler;
     private final Optional<String> groupId;
-    
-    private final ConsumerInterceptors<K, V> interceptors;
+    private final Logger log;
+
     private final SubscriptionState subscriptions;
     private final long defaultApiTimeoutMs;
-    private final FetchBuffer<K, V> fetchBuffer;
-    private final FetchCollector<K, V> fetchCollector;
 
     public PrototypeAsyncConsumer(final Properties properties,
                                   final Deserializer<K> keyDeserializer,
@@ -150,7 +146,6 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
         this.subscriptions = createSubscriptionState(config, logContext);
         Metrics metrics = createMetrics(config, time);
         List<ConsumerInterceptor<K, V>> interceptorList = getConfiguredConsumerInterceptors(config);
-        this.interceptors = new ConsumerInterceptors<>(interceptorList);
         ClusterResourceListeners clusterResourceListeners = ClientUtils.configureClusterResourceListeners(metrics.reporters(),
                 interceptorList,
                 Arrays.asList(deserializers.keyDeserializer, deserializers.valueDeserializer));
@@ -164,23 +159,22 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
         final BlockingQueue<BackgroundEvent> backgroundEventQueue = new LinkedBlockingQueue<>();
 
         FetchMetricsManager fetchMetricsManager = createFetchMetricsManager(metrics);
-        final Supplier<NetworkClientDelegate> networkClientDelegateSupplier = NetworkClientDelegate.creator(time,
+        final Supplier<NetworkClientDelegate> networkClientDelegateSupplier = NetworkClientDelegate.supplier(time,
                 logContext,
                 metadata,
                 config,
                 new ApiVersions(),
                 metrics,
                 fetchMetricsManager);
-        final Supplier<RequestManagers> requestManagersSupplier = RequestManagers.creator(time,
+        final Supplier<RequestManagers> requestManagersSupplier = RequestManagers.supplier(time,
                 logContext,
                 backgroundEventQueue,
                 metadata,
                 subscriptions,
                 config,
                 groupRebalanceConfig,
-                new ApiVersions(),
-                networkClientDelegateSupplier);
-        final Supplier<ApplicationEventProcessor> applicationEventProcessorSupplier = ApplicationEventProcessor.creator(logContext,
+                new ApiVersions());
+        final Supplier<ApplicationEventProcessor> applicationEventProcessorSupplier = ApplicationEventProcessor.supplier(logContext,
                 metadata,
                 backgroundEventQueue,
                 requestManagersSupplier);
@@ -192,16 +186,6 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
                 applicationEventProcessorSupplier,
                 networkClientDelegateSupplier,
                 requestManagersSupplier);
-
-        // These are specific to the foreground thread
-        FetchConfig<K, V> fetchConfig = createFetchConfig(config, deserializers);
-        this.fetchBuffer = new FetchBuffer<>(logContext);
-        this.fetchCollector = new FetchCollector<>(logContext,
-                metadata,
-                subscriptions,
-                fetchConfig,
-                fetchMetricsManager,
-                time);
     }
 
     public PrototypeAsyncConsumer(LogContext logContext,
@@ -209,22 +193,16 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
                                   ConsumerMetadata metadata,
                                   EventHandler eventHandler,
                                   Optional<String> groupId,
-                                  ConsumerInterceptors<K, V> interceptors,
                                   SubscriptionState subscriptions,
-                                  long defaultApiTimeoutMs,
-                                  FetchBuffer<K, V> fetchBuffer,
-                                  FetchCollector<K, V> fetchCollector) {
+                                  long defaultApiTimeoutMs) {
         this.logContext = logContext;
         this.log = logContext.logger(PrototypeAsyncConsumer.class);
         this.time = time;
         this.metadata = metadata;
         this.eventHandler = eventHandler;
         this.groupId = groupId;
-        this.interceptors = interceptors;
         this.subscriptions = subscriptions;
         this.defaultApiTimeoutMs = defaultApiTimeoutMs;
-        this.fetchBuffer = fetchBuffer;
-        this.fetchCollector = fetchCollector;
     }
 
     /**
