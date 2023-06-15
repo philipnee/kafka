@@ -16,7 +16,6 @@
  */
 package org.apache.kafka.clients.consumer.internals;
 
-import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.internals.events.ApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.ApplicationEventProcessor;
 import org.apache.kafka.clients.consumer.internals.events.BackgroundEvent;
@@ -33,13 +32,11 @@ import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 import java.util.function.Supplier;
 
-import static org.apache.kafka.clients.consumer.internals.PrototypeAsyncConsumer.NETWORK_THREAD_PREFIX;
-
 /**
  * An {@link EventHandler} that uses a single background thread to consume {@link ApplicationEvent} and produce
  * {@link BackgroundEvent} from the {@link DefaultBackgroundThread}.
  */
-public class DefaultEventHandler<K, V> implements EventHandler {
+public class DefaultEventHandler implements EventHandler {
 
     private final Logger log;
     private final Time time;
@@ -49,7 +46,6 @@ public class DefaultEventHandler<K, V> implements EventHandler {
     private final IdempotentCloser closer = new IdempotentCloser();
 
     public DefaultEventHandler(final Time time,
-                               final ConsumerConfig config,
                                final LogContext logContext,
                                final BlockingQueue<ApplicationEvent> applicationEventQueue,
                                final BlockingQueue<BackgroundEvent> backgroundEventQueue,

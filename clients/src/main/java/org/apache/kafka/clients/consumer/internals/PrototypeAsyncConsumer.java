@@ -98,14 +98,11 @@ import static org.apache.kafka.common.utils.Utils.propsToMap;
  * for detail implementation.
  */
 public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
-
     static final long DEFAULT_CLOSE_TIMEOUT_MS = 30 * 1000;
-    static final String NETWORK_THREAD_PREFIX = "kafka-consumer-network-thread";
 
     private final LogContext logContext;
-    private final Time time;
-    private final ConsumerMetadata metadata;
     private final EventHandler eventHandler;
+    private final Time time;
     private final Optional<String> groupId;
     private final Logger log;
 
@@ -149,7 +146,7 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
         ClusterResourceListeners clusterResourceListeners = ClientUtils.configureClusterResourceListeners(metrics.reporters(),
                 interceptorList,
                 Arrays.asList(deserializers.keyDeserializer, deserializers.valueDeserializer));
-        this.metadata = new ConsumerMetadata(config, subscriptions, logContext, clusterResourceListeners);
+        ConsumerMetadata metadata = new ConsumerMetadata(config, subscriptions, logContext, clusterResourceListeners);
         // Bootstrap the metadata with the bootstrap server IP address, which will be used once for the subsequent
         // metadata refresh once the background thread has started up.
         final List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(config);
@@ -178,8 +175,7 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
                 metadata,
                 backgroundEventQueue,
                 requestManagersSupplier);
-        this.eventHandler = new DefaultEventHandler<>(time,
-                config,
+        this.eventHandler = new DefaultEventHandler(time,
                 logContext,
                 applicationEventQueue,
                 backgroundEventQueue,
@@ -190,7 +186,6 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
 
     public PrototypeAsyncConsumer(LogContext logContext,
                                   Time time,
-                                  ConsumerMetadata metadata,
                                   EventHandler eventHandler,
                                   Optional<String> groupId,
                                   SubscriptionState subscriptions,
@@ -198,7 +193,6 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
         this.logContext = logContext;
         this.log = logContext.logger(PrototypeAsyncConsumer.class);
         this.time = time;
-        this.metadata = metadata;
         this.eventHandler = eventHandler;
         this.groupId = groupId;
         this.subscriptions = subscriptions;

@@ -66,7 +66,7 @@ public class DefaultBackgroundThread extends KafkaThread implements Closeable {
                                    Supplier<RequestManagers> requestManagersSupplier) {
         super(BACKGROUND_THREAD_NAME, true);
         this.time = time;
-        this.log = logContext.logger(DefaultBackgroundThread.class);
+        this.log = logContext.logger(getClass());
         this.applicationEventQueue = applicationEventQueue;
         this.applicationEventProcessorSupplier = applicationEventProcessorSupplier;
         this.networkClientDelegateSupplier = networkClientDelegateSupplier;

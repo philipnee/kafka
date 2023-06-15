@@ -174,9 +174,8 @@ public class ConsumerTestBuilder implements Closeable {
         final EventHandler eventHandler;
 
         public DefaultEventHandlerTestBuilder() {
-            this.eventHandler = spy(new DefaultEventHandler<>(
+            this.eventHandler = spy(new DefaultEventHandler(
                     time,
-                    config,
                     logContext,
                     applicationEventQueue,
                     backgroundEventQueue,
@@ -198,7 +197,6 @@ public class ConsumerTestBuilder implements Closeable {
         public PrototypeAsyncConsumerTestBuilder(Optional<String> groupIdOpt) {
             this.consumer = spy(new PrototypeAsyncConsumer<>(logContext,
                     time,
-                    metadata,
                     eventHandler,
                     groupIdOpt,
                     subscriptions,
