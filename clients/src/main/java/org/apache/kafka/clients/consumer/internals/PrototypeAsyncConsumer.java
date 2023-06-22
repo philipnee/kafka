@@ -327,7 +327,15 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
 
     @Override
     public void seek(TopicPartition partition, long offset) {
-        throw new KafkaException("method not implemented");
+        if (offset < 0)
+            throw new IllegalArgumentException("seek offset must not be a negative number");
+
+        log.info("Seeking to offset {} for partition {}", offset, partition);
+        SubscriptionState.FetchPosition newPosition = new SubscriptionState.FetchPosition(
+                offset,
+                Optional.empty(), // This will ensure we skip validation
+                this.metadata.currentLeader(partition));
+        this.subscriptions.seekUnvalidated(partition, newPosition);
     }
 
     @Override
