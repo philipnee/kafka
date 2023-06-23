@@ -61,9 +61,11 @@ public class ConsumerTestBuilder implements Closeable {
     final BlockingQueue<ApplicationEvent> applicationEventQueue;
     final LinkedBlockingQueue<BackgroundEvent> backgroundEventQueue;
     final ConsumerConfig config;
+    final long retryBackoffMs;
     final SubscriptionState subscriptions;
     final ConsumerMetadata metadata;
     final FetchConfig<String, String> fetchConfig;
+    final Metrics metrics;
     final FetchMetricsManager metricsManager;
     final NetworkClientDelegate networkClientDelegate;
     final ListOffsetsRequestManager listOffsetsRequestManager;
@@ -97,9 +99,9 @@ public class ConsumerTestBuilder implements Closeable {
 
         this.config = new ConsumerConfig(properties);
         IsolationLevel isolationLevel = getConfiguredIsolationLevel(config);
-        final long retryBackoffMs = config.getLong(ConsumerConfig.RETRY_BACKOFF_MS_CONFIG);
+        this.retryBackoffMs = config.getLong(ConsumerConfig.RETRY_BACKOFF_MS_CONFIG);
         final long requestTimeoutMs = config.getInt(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG);
-        Metrics metrics = createMetrics(config, time);
+        this.metrics = createMetrics(config, time);
 
         this.subscriptions = createSubscriptionState(config, logContext);
         this.metadata = spy(new ConsumerMetadata(config, subscriptions, logContext, new ClusterResourceListeners()));
@@ -212,10 +214,12 @@ public class ConsumerTestBuilder implements Closeable {
             this.consumer = spy(new PrototypeAsyncConsumer<>(logContext,
                     time,
                     eventHandler,
+                    metrics,
                     groupIdOpt,
                     subscriptions,
                     3000,
                     metadata,
+                    retryBackoffMs,
                     new ConsumerInterceptors<>(Collections.emptyList()),
                     new FetchBuffer<>(logContext),
                     fetchCollector));

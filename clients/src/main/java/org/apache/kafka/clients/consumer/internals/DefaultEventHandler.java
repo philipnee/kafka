@@ -24,6 +24,7 @@ import org.apache.kafka.clients.consumer.internals.events.EventHandler;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
+import org.apache.kafka.common.utils.Timer;
 import org.slf4j.Logger;
 
 import java.time.Duration;
@@ -83,11 +84,11 @@ public class DefaultEventHandler<K, V> implements EventHandler {
     }
 
     @Override
-    public <T> T addAndGet(final CompletableApplicationEvent<T> event, final Duration timeout) {
+    public <T> T addAndGet(final CompletableApplicationEvent<T> event, final Timer timer) {
         Objects.requireNonNull(event, "CompletableApplicationEvent provided to addAndGet must be non-null");
-        Objects.requireNonNull(timeout, "Duration provided to addAndGet must be non-null");
+        Objects.requireNonNull(timer, "Timer provided to addAndGet must be non-null");
         add(event);
-        return event.get(time.timer(timeout));
+        return event.get(timer);
     }
 
     public void close(final Duration timeout) {
@@ -110,6 +111,5 @@ public class DefaultEventHandler<K, V> implements EventHandler {
                     }
                 },
                 () -> log.info("The default consumer event handler was already closed"));
-
     }
 }

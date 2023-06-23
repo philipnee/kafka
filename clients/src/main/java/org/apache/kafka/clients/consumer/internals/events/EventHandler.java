@@ -57,29 +57,12 @@ public interface EventHandler extends Closeable {
      *
      * See {@link CompletableApplicationEvent#get(Timer)} and {@link Future#get(long, TimeUnit)} for more details.
      *
-     * @param event     An {@link CompletableApplicationEvent} created by the polling thread.
-     * @param timeoutMs Value in milliseconds for which to wait for the event to complete
-     * @return          Value that is the result of the event
-     * @param <T>       Type of return value of the event
+     * @param event An {@link CompletableApplicationEvent} created by the polling thread.
+     * @param timer Timer for which to wait for the event to complete
+     * @return      Value that is the result of the event
+     * @param <T>   Type of return value of the event
      */
-    default <T> T addAndGet(CompletableApplicationEvent<T> event, long timeoutMs) {
-        return addAndGet(event, Duration.ofMillis(timeoutMs));
-    }
-
-    /**
-     * Add an {@link CompletableApplicationEvent} to the handler. The method blocks, waiting for the result, and will
-     * return the result value upon successful completion; otherwise throws an error.
-     *
-     * <p/>
-     *
-     * See {@link CompletableApplicationEvent#get(Timer)} and {@link Future#get(long, TimeUnit)} for more details.
-     *
-     * @param event   An {@link CompletableApplicationEvent} created by the polling thread.
-     * @param timeout Duration in milliseconds for which to wait for the event to complete
-     * @return        Value that is the result of the event
-     * @param <T>     Type of return value of the event
-     */
-    <T> T addAndGet(CompletableApplicationEvent<T> event, Duration timeout);
+    <T> T addAndGet(final CompletableApplicationEvent<T> event, final Timer timer);
 
     default void close() {
         close(Duration.ofMillis(Long.MAX_VALUE));

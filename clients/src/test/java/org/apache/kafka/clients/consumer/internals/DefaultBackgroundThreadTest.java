@@ -170,7 +170,7 @@ public class DefaultBackgroundThreadTest {
     @Test
     void testFetchTopicMetadata() {
         when(this.topicMetadataRequestManager.requestTopicMetadata(Optional.of(anyString()))).thenReturn(new CompletableFuture<>());
-        this.applicationEventsQueue.add(new TopicMetadataApplicationEvent("topic"));
+        this.applicationEventsQueue.add(new TopicMetadataApplicationEvent(Optional.of("topic")));
         backgroundThread.runOnce();
         verify(applicationEventProcessor).process(any(TopicMetadataApplicationEvent.class));
         backgroundThread.close();

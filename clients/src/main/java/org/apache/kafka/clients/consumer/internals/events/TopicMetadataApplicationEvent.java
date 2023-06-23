@@ -20,15 +20,27 @@ import org.apache.kafka.common.PartitionInfo;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 public class TopicMetadataApplicationEvent extends CompletableApplicationEvent<Map<String, List<PartitionInfo>>> {
-    private final String topic;
-    public TopicMetadataApplicationEvent(final String topic) {
+
+    private final Optional<String> topic;
+
+    public TopicMetadataApplicationEvent(final Optional<String> topic) {
         super(Type.TOPIC_METADATA);
         this.topic = topic;
     }
 
-    public String topic() {
+    public Optional<String> topic() {
         return topic;
+    }
+
+    @Override
+    public String toString() {
+        return "TopicMetadataApplicationEvent{" +
+                "topic=" + topic +
+                ", future=" + future +
+                ", type=" + type +
+                '}';
     }
 }
