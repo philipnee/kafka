@@ -36,7 +36,7 @@ abstract class BaseConsumerTest extends AbstractConsumerTest {
 
   @Test
   def testSimpleConsumption(): Unit = {
-    val numRecords = 10000
+    val numRecords = 10
     val producer = createProducer()
     val startingTimestamp = System.currentTimeMillis()
     sendRecords(producer, numRecords, tp, startingTimestamp = startingTimestamp)

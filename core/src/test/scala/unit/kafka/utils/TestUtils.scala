@@ -1039,7 +1039,7 @@ object TestUtils extends Logging {
     waitUntilTrue(() => {
       val records = consumer.poll(Duration.ofMillis(100))
       action(records)
-    }, msg = msg, pause = 0L, waitTimeMs = waitTimeMs)
+    }, msg = msg, pause = 1000L, waitTimeMs = waitTimeMs)
   }
 
   def subscribeAndWaitForRecords(topic: String,
