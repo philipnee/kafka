@@ -139,7 +139,6 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
         ListOffsetsRequestState listOffsetsRequestState = new ListOffsetsRequestState(
                 timestampsToSearch,
                 requireTimestamps,
-                offsetFetcherUtils,
                 isolationLevel);
         listOffsetsRequestState.globalResult.whenComplete((result, error) -> {
             metadata.clearTransientTopics();
@@ -354,12 +353,10 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
         private final Map<TopicPartition, Long> remainingToSearch;
         private final CompletableFuture<ListOffsetResult> globalResult;
         final boolean requireTimestamps;
-        final OffsetFetcherUtils offsetFetcherUtils;
         final IsolationLevel isolationLevel;
 
         private ListOffsetsRequestState(Map<TopicPartition, Long> timestampsToSearch,
                                         boolean requireTimestamps,
-                                        OffsetFetcherUtils offsetFetcherUtils,
                                         IsolationLevel isolationLevel) {
             remainingToSearch = new HashMap<>();
             fetchedOffsets = new HashMap<>();
@@ -367,7 +364,6 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
 
             this.timestampsToSearch = timestampsToSearch;
             this.requireTimestamps = requireTimestamps;
-            this.offsetFetcherUtils = offsetFetcherUtils;
             this.isolationLevel = isolationLevel;
         }
 
