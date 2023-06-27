@@ -80,8 +80,8 @@ public class TopicMetadataRequestManager implements RequestManager {
             .map(Optional::get)
             .collect(Collectors.toList());
         return requests.isEmpty() ?
-            new NetworkClientDelegate.PollResult(Long.MAX_VALUE, new ArrayList<>()) :
-            new NetworkClientDelegate.PollResult(0, Collections.unmodifiableList(requests));
+            NetworkClientDelegate.PollResult.noop():
+            new NetworkClientDelegate.PollResult(0, requests);
     }
 
     /**

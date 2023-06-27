@@ -94,12 +94,11 @@ public class CommitRequestManager implements RequestManager {
     public NetworkClientDelegate.PollResult poll(final long currentTimeMs) {
         maybeAutoCommit();
         if (!pendingRequests.hasUnsentRequests()) {
-            return new NetworkClientDelegate.PollResult(Long.MAX_VALUE, Collections.emptyList());
+            return NetworkClientDelegate.PollResult.noop();
         }
 
         pendingRequests.inflightOffsetFetches.forEach(System.out::println);
-        return new NetworkClientDelegate.PollResult(Long.MAX_VALUE,
-                Collections.unmodifiableList(pendingRequests.drain(currentTimeMs)));
+        return new NetworkClientDelegate.PollResult(pendingRequests.drain(currentTimeMs));
     }
 
     private void maybeAutoCommit() {

@@ -104,7 +104,7 @@ public class FetchRequestManager<K, V> extends AbstractFetch<K, V> implements Re
             }).collect(Collectors.toList());
         }
 
-        return new PollResult(Long.MAX_VALUE, requests);
+        return new PollResult(requests);
     }
 
     /**

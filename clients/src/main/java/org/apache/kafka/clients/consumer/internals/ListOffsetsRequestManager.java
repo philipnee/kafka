@@ -107,14 +107,14 @@ public class ListOffsetsRequestManager implements RequestManager, ClusterResourc
     @Override
     public NetworkClientDelegate.PollResult poll(final long currentTimeMs) {
         if (requestsToSend.isEmpty()) {
-            return new NetworkClientDelegate.PollResult(Long.MAX_VALUE, Collections.emptyList());
+            return NetworkClientDelegate.PollResult.noop();
         }
 
-        NetworkClientDelegate.PollResult pollResult =
-                new NetworkClientDelegate.PollResult(Long.MAX_VALUE, new ArrayList<>(requestsToSend));
-        this.requestsToSend.clear();
+        // Don't pass in requestsToSend directly to the PollResult constructor. First make a copy, then clear our state.
+        ArrayList<NetworkClientDelegate.UnsentRequest> unsentRequests = new ArrayList<>(requestsToSend);
+        requestsToSend.clear();
 
-        return pollResult;
+        return new NetworkClientDelegate.PollResult(unsentRequests);
     }
 
     /**

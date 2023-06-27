@@ -214,9 +214,29 @@ public class NetworkClientDelegate implements NodeStatusDetector, AutoCloseable 
         public final long timeUntilNextPollMs;
         public final List<UnsentRequest> unsentRequests;
 
-        public PollResult(final long timeMsTillNextPoll, final List<UnsentRequest> unsentRequests) {
-            this.timeUntilNextPollMs = timeMsTillNextPoll;
+        public PollResult(final long timeUntilNextPollMs, final List<UnsentRequest> unsentRequests) {
+            this.timeUntilNextPollMs = timeUntilNextPollMs;
             this.unsentRequests = Collections.unmodifiableList(unsentRequests);
+        }
+
+        public PollResult(final long timeUntilNextPollMs, final UnsentRequest unsentRequest) {
+            this(timeUntilNextPollMs, Collections.singletonList(unsentRequest));
+        }
+
+        public PollResult(final long timeUntilNextPollMs) {
+            this(timeUntilNextPollMs, Collections.emptyList());
+        }
+
+        public PollResult(final List<UnsentRequest> unsentRequests) {
+            this(Long.MAX_VALUE, unsentRequests);
+        }
+
+        public PollResult(final UnsentRequest unsentRequest) {
+            this(Long.MAX_VALUE, Collections.singletonList(unsentRequest));
+        }
+
+        public static PollResult noop() {
+            return new PollResult(Long.MAX_VALUE, Collections.emptyList());
         }
     }
     public static class UnsentRequest {
