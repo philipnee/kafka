@@ -262,25 +262,24 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
             throw new IllegalStateException("Consumer is not subscribed to any topics or assigned any partitions");
         }
 
-        try {
-            Timer timer = time.timer(timeout);
+        Timer timer = time.timer(timeout);
 
-            do {
-                final Fetch<K, V> fetch = pollForFetches(timer);
+        do {
+            updateAssignmentMetadataIfNeeded(timer);
+            final Fetch<K, V> fetch = pollForFetches(timer);
 
-                if (!fetch.isEmpty()) {
-                    if (fetch.records().isEmpty()) {
-                        log.trace("Returning empty records from `poll()` "
-                                + "since the consumer's position has advanced for at least one topic partition");
-                    }
+            if (!fetch.isEmpty()) {
+                sendFetches();
 
-                    return this.interceptors.onConsume(new ConsumerRecords<>(fetch.records()));
+                if (fetch.records().isEmpty()) {
+                    log.trace("Returning empty records from `poll()` "
+                            + "since the consumer's position has advanced for at least one topic partition");
                 }
-                // We will wait for retryBackoffMs
-            } while (timer.notExpired());
-        } catch (final Exception e) {
-            throw new RuntimeException(e);
-        }
+
+                return this.interceptors.onConsume(new ConsumerRecords<>(fetch.records()));
+            }
+            // We will wait for retryBackoffMs
+        } while (timer.notExpired());
 
         return ConsumerRecords.empty();
     }
@@ -782,7 +781,6 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
         // If any partitions have been truncated due to a leader change, we need to validate the offsets
         ResetPositionsApplicationEvent event = new ResetPositionsApplicationEvent();
         eventHandler.add(event);
-        event.get(timer);
 
         cachedSubscriptionHasAllFetchPositions = subscriptions.hasAllFetchPositions();
         if (cachedSubscriptionHasAllFetchPositions) return true;
@@ -814,6 +812,10 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
         else if (newConfigs.get(VALUE_DESERIALIZER_CLASS_CONFIG) == null)
             throw new ConfigException(VALUE_DESERIALIZER_CLASS_CONFIG, null, "must be non-null.");
         return newConfigs;
+    }
+
+    boolean updateAssignmentMetadataIfNeeded(final Timer timer) {
+        return updateFetchPositions(timer);
     }
 
     private class DefaultOffsetCommitCallback implements OffsetCommitCallback {
