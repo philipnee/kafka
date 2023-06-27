@@ -73,7 +73,6 @@ public class SubscriptionState {
             "Subscription to topics, partitions and pattern are mutually exclusive";
 
     private final Logger log;
-    private final LogContext logContext;
 
     private enum SubscriptionType {
         NONE, AUTO_TOPICS, AUTO_PATTERN, USER_ASSIGNED
@@ -132,7 +131,6 @@ public class SubscriptionState {
 
     public SubscriptionState(LogContext logContext, OffsetResetStrategy defaultResetStrategy) {
         this.log = logContext.logger(this.getClass());
-        this.logContext = logContext;
         this.defaultResetStrategy = defaultResetStrategy;
         this.subscription = new TreeSet<>(); // use a sorted set for better logging
         this.assignment = new PartitionStates<>();
@@ -232,7 +230,7 @@ public class SubscriptionState {
         for (TopicPartition partition : partitions) {
             TopicPartitionState state = assignment.stateValue(partition);
             if (state == null)
-                state = new TopicPartitionState(logContext);
+                state = new TopicPartitionState();
             partitionToState.put(partition, state);
 
             manualSubscribedTopics.add(partition.topic());
@@ -279,7 +277,7 @@ public class SubscriptionState {
         for (TopicPartition tp : assignments) {
             TopicPartitionState state = this.assignment.stateValue(tp);
             if (state == null)
-                state = new TopicPartitionState(logContext);
+                state = new TopicPartitionState();
             assignedPartitionStates.put(tp, state);
         }
 
@@ -772,7 +770,6 @@ public class SubscriptionState {
 
     private static class TopicPartitionState {
 
-        private Logger log;
         private FetchState fetchState;
         private FetchPosition position; // last consumed position
 
@@ -787,8 +784,7 @@ public class SubscriptionState {
         private Long preferredReadReplicaExpireTimeMs;
         private boolean endOffsetRequested;
         
-        TopicPartitionState(LogContext logContext) {
-            this.log = logContext.logger(TopicPartitionState.class);
+        TopicPartitionState() {
             this.paused = false;
             this.pendingRevocation = false;
             this.endOffsetRequested = false;
@@ -811,8 +807,6 @@ public class SubscriptionState {
         }
 
         private void transitionState(FetchState newState, Runnable runIfTransitioned) {
-            log.info("transitionState - fetchState: {}, newState: {}", fetchState, newState);
-
             FetchState nextState = this.fetchState.transitionTo(newState);
             if (nextState.equals(newState)) {
                 this.fetchState = nextState;
@@ -897,13 +891,11 @@ public class SubscriptionState {
 
         private void validatePosition(FetchPosition position) {
             if (position.offsetEpoch.isPresent() && position.currentLeader.epoch.isPresent()) {
-                log.info("validatePosition - a - position: {}", position);
                 transitionState(FetchStates.AWAIT_VALIDATION, () -> {
                     this.position = position;
                     this.nextRetryTimeMs = null;
                 });
             } else {
-                log.info("validatePosition - b - position: {}", position);
                 // If we have no epoch information for the current position, then we can skip validation
                 transitionState(FetchStates.FETCHING, () -> {
                     this.position = position;
