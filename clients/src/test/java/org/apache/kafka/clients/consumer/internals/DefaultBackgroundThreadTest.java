@@ -25,6 +25,7 @@ import org.apache.kafka.clients.consumer.internals.events.NoopApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.ResetPositionsApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.TopicMetadataApplicationEvent;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.TopicAuthorizationException;
 import org.apache.kafka.common.message.FindCoordinatorRequestData;
 import org.apache.kafka.common.requests.FindCoordinatorRequest;
 import org.apache.kafka.common.utils.Time;
@@ -41,13 +42,16 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -63,6 +67,7 @@ public class DefaultBackgroundThreadTest {
     private CoordinatorRequestManager coordinatorManager;
     private CommitRequestManager commitManager;
     private TopicMetadataRequestManager topicMetadataRequestManager;
+    private ListOffsetsRequestManager listOffsetsRequestManager;
     private DefaultBackgroundThread<String, String> backgroundThread;
 
     @BeforeEach
@@ -76,6 +81,7 @@ public class DefaultBackgroundThreadTest {
         this.coordinatorManager = testBuilder.coordinatorRequestManager;
         this.commitManager = testBuilder.commitRequestManager;
         this.topicMetadataRequestManager = testBuilder.topicMetadataRequestManager;
+        this.listOffsetsRequestManager = testBuilder.listOffsetsRequestManager;
         this.backgroundThread = testBuilder.backgroundThread;
         this.backgroundThread.initializeResources();
     }
@@ -149,11 +155,29 @@ public class DefaultBackgroundThreadTest {
 
     @Test
     public void testResetPositionsEventIsProcessed() {
-        ApplicationEvent e = new ResetPositionsApplicationEvent();
-        this.applicationEventsQueue.add(e);
+        ResetPositionsApplicationEvent event = new ResetPositionsApplicationEvent();
+        this.applicationEventsQueue.add(event);
         backgroundThread.runOnce();
         verify(applicationEventProcessor).process(any(ResetPositionsApplicationEvent.class));
         assertTrue(applicationEventsQueue.isEmpty());
+        assertTrue(event.future().isDone());
+        assertFalse(event.future().isCompletedExceptionally());
+        backgroundThread.close();
+    }
+
+    @Test
+    public void testResetPositionsProcessThrowsCachedExceptionFromPreviousRequest() {
+        TopicAuthorizationException authException = new TopicAuthorizationException("Topic authorization failed");
+        doThrow(authException).when(listOffsetsRequestManager).resetPositionsIfNeeded();
+
+        ResetPositionsApplicationEvent event = new ResetPositionsApplicationEvent();
+        this.applicationEventsQueue.add(event);
+        backgroundThread.runOnce();
+
+        verify(applicationEventProcessor).process(any(ResetPositionsApplicationEvent.class));
+        assertTrue(event.future().isCompletedExceptionally());
+        ExecutionException error = assertThrows(ExecutionException.class, () -> event.future().get());
+        assertEquals(authException, error.getCause());
         backgroundThread.close();
     }
 
