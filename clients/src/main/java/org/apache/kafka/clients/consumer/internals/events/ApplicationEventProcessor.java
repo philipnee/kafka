@@ -86,7 +86,7 @@ public class ApplicationEventProcessor<K, V> {
             case FETCH:
                 return process((FetchEvent<K, V>) event);
             case RESET_POSITIONS:
-                return processResetPositionsEvent();
+                return process((ResetPositionsApplicationEvent) event);
         }
         return false;
     }
@@ -166,8 +166,27 @@ public class ApplicationEventProcessor<K, V> {
         return true;
     }
 
-    private boolean processResetPositionsEvent() {
-        requestManagers.listOffsetsRequestManager.resetPositionsIfNeeded();
+    /**
+     * To process a ResetPositionsApplicationEvent, this will determine the partitions needing
+     * reset and, if any, it will perform a ListOffsetRequest to retrieve its offsets based on
+     * the reset strategy defined. It will also update in-memory positions based on the retrieved
+     * offsets.
+     * <p>
+     * In the case a request is performed and the response contains some error, the exception
+     * will be cached, to be thrown the next time a reset event is processed.
+     * <p>
+     * The ResetPositionsApplicationEvent event future completes when the resetPositions has been
+     * successfully processed. It fails if an error occur while processing the event, or if there
+     * is a cached exception from a previous ListOffsetRequest request.
+     */
+    private boolean process(final ResetPositionsApplicationEvent event) {
+        try {
+            requestManagers.listOffsetsRequestManager.resetPositionsIfNeeded();
+            event.future().complete(null);
+        } catch (Exception e) {
+            log.error("Reset positions event failed", e);
+            event.future().completeExceptionally(e);
+        }
         return true;
     }
 
