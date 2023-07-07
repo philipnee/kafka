@@ -42,7 +42,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -160,24 +159,19 @@ public class DefaultBackgroundThreadTest {
         backgroundThread.runOnce();
         verify(applicationEventProcessor).process(any(ResetPositionsApplicationEvent.class));
         assertTrue(applicationEventsQueue.isEmpty());
-        assertTrue(event.future().isDone());
-        assertFalse(event.future().isCompletedExceptionally());
         backgroundThread.close();
     }
 
     @Test
-    public void testResetPositionsProcessThrowsCachedExceptionFromPreviousRequest() {
+    public void testResetPositionsProcessFailureInterruptsBackgroundThread() {
         TopicAuthorizationException authException = new TopicAuthorizationException("Topic authorization failed");
         doThrow(authException).when(listOffsetsRequestManager).resetPositionsIfNeeded();
 
         ResetPositionsApplicationEvent event = new ResetPositionsApplicationEvent();
         this.applicationEventsQueue.add(event);
-        backgroundThread.runOnce();
+        assertThrows(TopicAuthorizationException.class, () -> backgroundThread.runOnce());
 
         verify(applicationEventProcessor).process(any(ResetPositionsApplicationEvent.class));
-        assertTrue(event.future().isCompletedExceptionally());
-        ExecutionException error = assertThrows(ExecutionException.class, () -> event.future().get());
-        assertEquals(authException, error.getCause());
         backgroundThread.close();
     }
 

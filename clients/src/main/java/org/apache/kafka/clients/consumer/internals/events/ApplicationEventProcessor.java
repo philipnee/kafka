@@ -172,21 +172,12 @@ public class ApplicationEventProcessor<K, V> {
      * the reset strategy defined. It will also update in-memory positions based on the retrieved
      * offsets.
      * <p>
-     * In the case a request is performed and the response contains some error, the exception
-     * will be cached, to be thrown the next time a reset event is processed.
-     * <p>
-     * The ResetPositionsApplicationEvent event future completes when the resetPositions has been
-     * successfully processed. It fails if an error occur while processing the event, or if there
-     * is a cached exception from a previous ListOffsetRequest request.
+     * This may throw an exception cached in memory from the previous request if it failed.
      */
     private boolean process(final ResetPositionsApplicationEvent event) {
-        try {
-            requestManagers.listOffsetsRequestManager.resetPositionsIfNeeded();
-            event.future().complete(null);
-        } catch (Exception e) {
-            log.error("Reset positions event failed", e);
-            event.future().completeExceptionally(e);
-        }
+        requestManagers.listOffsetsRequestManager.resetPositionsIfNeeded();
+        // TODO: chain future to process failures at a higher level once the caching logic for
+        //  exceptions is reviewed/removed
         return true;
     }
 
