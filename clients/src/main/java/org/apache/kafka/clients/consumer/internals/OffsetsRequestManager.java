@@ -435,7 +435,6 @@ public class OffsetsRequestManager implements RequestManager, ClusterResourceLis
 
             NodeApiVersions nodeApiVersions = apiVersions.get(node.idString());
             if (nodeApiVersions == null) {
-                // client.tryConnect(node);
                 return;
             }
 

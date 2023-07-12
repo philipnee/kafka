@@ -118,8 +118,8 @@ public final class OffsetsForLeaderEpochUtils {
 
         if (!unauthorizedTopics.isEmpty())
             throw new TopicAuthorizationException(unauthorizedTopics);
-        else
-            return new OffsetForEpochResult(endOffsets, partitionsToRetry);
+
+        return new OffsetForEpochResult(endOffsets, partitionsToRetry);
     }
 
     static class OffsetForEpochResult {
