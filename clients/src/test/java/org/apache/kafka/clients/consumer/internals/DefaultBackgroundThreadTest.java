@@ -97,7 +97,7 @@ public class DefaultBackgroundThreadTest {
         assertFalse(backgroundThread.isRunning());
 
         // There's a nonzero amount of time between starting the thread and having it
-        // begin to execute our code. Wait for a bit before checking...
+        // begins to execute our code. Wait for a bit before checking...
         int maxWaitMs = 1000;
         TestUtils.waitForCondition(backgroundThread::isRunning,
                 maxWaitMs,
@@ -208,6 +208,26 @@ public class DefaultBackgroundThreadTest {
         assertEquals(10, backgroundThread.handlePollResult(failure));
     }
 
+    @Test
+    void testRequestManagersArePolled() {
+        NetworkClientDelegate.PollResult pollCoordinatorRes = mockPollCoordinatorResult();
+        NetworkClientDelegate.PollResult pollCommitRes = mockPollCommitResult();
+        NetworkClientDelegate.PollResult pollListOffsetsRes = mockPollListOffsetsResult();
+        NetworkClientDelegate.PollResult pollTopicMetadataRes = mockPollTopicMetadataResult();
+
+        when(coordinatorManager.poll(anyLong())).thenReturn(pollCoordinatorRes);
+        when(commitManager.poll(anyLong())).thenReturn(pollCommitRes);
+        when(listOffsetsRequestManager.poll(anyLong())).thenReturn(pollListOffsetsRes);
+        when(topicMetadataRequestManager.poll(anyLong())).thenReturn(pollTopicMetadataRes);
+        backgroundThread.runOnce();
+        verify(coordinatorManager, times(1)).poll(anyLong());
+        verify(commitManager, times(1)).poll(anyLong());
+        verify(listOffsetsRequestManager, times(1)).poll(anyLong());
+        verify(topicMetadataRequestManager, times(1)).poll(anyLong());
+        verify(networkClient, times(1)).poll(anyLong(), anyLong());
+        backgroundThread.close();
+    }
+
     private NetworkClientDelegate.UnsentRequest findCoordinatorUnsentRequest() {
         NetworkClientDelegate.UnsentRequest req = new NetworkClientDelegate.UnsentRequest(
                 new FindCoordinatorRequest.Builder(
@@ -217,6 +237,18 @@ public class DefaultBackgroundThreadTest {
                 Optional.empty());
         req.setTimer(time, ConsumerTestBuilder.REQUEST_TIMEOUT_MS);
         return req;
+    }
+
+    private NetworkClientDelegate.PollResult mockPollTopicMetadataResult() {
+        return new NetworkClientDelegate.PollResult(
+                ConsumerTestBuilder.RETRY_BACKOFF_MS,
+                Collections.singletonList(findCoordinatorUnsentRequest()));
+    }
+
+    private NetworkClientDelegate.PollResult mockPollListOffsetsResult() {
+        return new NetworkClientDelegate.PollResult(
+                ConsumerTestBuilder.RETRY_BACKOFF_MS,
+                Collections.singletonList(findCoordinatorUnsentRequest()));
     }
 
     private NetworkClientDelegate.PollResult mockPollCoordinatorResult() {
