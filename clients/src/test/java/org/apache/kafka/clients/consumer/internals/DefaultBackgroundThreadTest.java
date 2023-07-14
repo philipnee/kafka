@@ -99,7 +99,7 @@ public class DefaultBackgroundThreadTest {
         assertFalse(backgroundThread.isRunning());
 
         // There's a nonzero amount of time between starting the thread and having it
-        // begins to execute our code. Wait for a bit before checking...
+        // begin to execute our code. Wait for a bit before checking...
         int maxWaitMs = 1000;
         TestUtils.waitForCondition(backgroundThread::isRunning,
                 maxWaitMs,
