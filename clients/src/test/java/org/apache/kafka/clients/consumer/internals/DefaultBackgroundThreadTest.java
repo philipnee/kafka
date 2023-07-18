@@ -226,14 +226,12 @@ public class DefaultBackgroundThreadTest {
     }
 
     @Test
-    void testTriggerClusterResourceListenerOnMetadataUpdate() {
+    void testEnsureMetadataUpdateOnPoll() {
         MetadataResponse metadataResponse = RequestTestUtils.metadataUpdateWith(2, Collections.emptyMap());
         client.prepareMetadataUpdate(metadataResponse);
         metadata.requestUpdate();
         backgroundThread.runOnce();
         verify(this.metadata, times(1)).updateWithCurrentRequestVersion(eq(metadataResponse), eq(false), anyLong());
-        verify(this.offsetsRequestManager, times(1)).poll(anyLong());
-        verify(this.testBuilder.metadataUpdateCallback, times(1)).call();
         backgroundThread.close();
     }
 

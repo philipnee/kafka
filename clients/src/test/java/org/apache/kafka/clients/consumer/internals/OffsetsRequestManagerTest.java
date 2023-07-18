@@ -762,10 +762,4 @@ public class OffsetsRequestManagerTest {
 
         return new ListOffsetsResponse(responseData);
     }
-
-    public static class DefaultMetadataUpdateCallback implements OffsetsRequestManager.MetadataUpdateCallback {
-        @Override
-        public void call() {
-        }
-    }
 }

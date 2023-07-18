@@ -68,7 +68,6 @@ public class ConsumerTestBuilder implements Closeable {
     final FetchMetricsManager metricsManager;
     final NetworkClientDelegate networkClientDelegate;
     final OffsetsRequestManager offsetsRequestManager;
-    final OffsetsRequestManager.MetadataUpdateCallback metadataUpdateCallback;
     final TopicMetadataRequestManager topicMetadataRequestManager;
     final CoordinatorRequestManager coordinatorRequestManager;
     final CommitRequestManager commitRequestManager;
@@ -126,7 +125,6 @@ public class ConsumerTestBuilder implements Closeable {
                 config,
                 logContext,
                 client));
-        this.metadataUpdateCallback = spy(new OffsetsRequestManagerTest.DefaultMetadataUpdateCallback());
         this.offsetsRequestManager = spy(new OffsetsRequestManager(subscriptions,
                 metadata,
                 isolationLevel,
@@ -134,8 +132,7 @@ public class ConsumerTestBuilder implements Closeable {
                 retryBackoffMs,
                 requestTimeoutMs,
                 apiVersions,
-                logContext,
-                metadataUpdateCallback));
+                logContext));
         this.topicMetadataRequestManager = spy(new TopicMetadataRequestManager(logContext, config));
         this.coordinatorRequestManager = spy(new CoordinatorRequestManager(time,
                 logContext,
