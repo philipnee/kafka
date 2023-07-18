@@ -113,14 +113,14 @@ public class OffsetsRequestManager implements RequestManager, ClusterResourceLis
 
     // Visible for testing
     OffsetsRequestManager(final SubscriptionState subscriptionState,
-                                 final ConsumerMetadata metadata,
-                                 final IsolationLevel isolationLevel,
-                                 final Time time,
-                                 final long retryBackoffMs,
-                                 final long requestTimeoutMs,
-                                 final ApiVersions apiVersions,
-                                 final LogContext logContext,
-                                 final MetadataUpdateCallback metadataUpdateCallback) {
+                          final ConsumerMetadata metadata,
+                          final IsolationLevel isolationLevel,
+                          final Time time,
+                          final long retryBackoffMs,
+                          final long requestTimeoutMs,
+                          final ApiVersions apiVersions,
+                          final LogContext logContext,
+                          final MetadataUpdateCallback metadataUpdateCallback) {
         this(subscriptionState, metadata, isolationLevel, time, retryBackoffMs, requestTimeoutMs, apiVersions, logContext);
         this.metadataUpdateCallback = Optional.of(metadataUpdateCallback);
     }
