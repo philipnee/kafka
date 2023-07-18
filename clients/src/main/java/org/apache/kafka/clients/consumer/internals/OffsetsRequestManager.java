@@ -80,6 +80,7 @@ public class OffsetsRequestManager implements RequestManager, ClusterResourceLis
     private final long requestTimeoutMs;
     private final Time time;
     private final ApiVersions apiVersions;
+    private Optional<MetadataUpdateCallback> metadataUpdateCallback = Optional.empty();
 
     public OffsetsRequestManager(final SubscriptionState subscriptionState,
                                  final ConsumerMetadata metadata,
@@ -108,6 +109,20 @@ public class OffsetsRequestManager implements RequestManager, ClusterResourceLis
         this.apiVersions = apiVersions;
         this.offsetFetcherUtils = new OffsetFetcherUtils(logContext, metadata, subscriptionState,
                 time, retryBackoffMs, apiVersions);
+    }
+
+    // Visible for testing
+    OffsetsRequestManager(final SubscriptionState subscriptionState,
+                                 final ConsumerMetadata metadata,
+                                 final IsolationLevel isolationLevel,
+                                 final Time time,
+                                 final long retryBackoffMs,
+                                 final long requestTimeoutMs,
+                                 final ApiVersions apiVersions,
+                                 final LogContext logContext,
+                                 final MetadataUpdateCallback metadataUpdateCallback) {
+        this(subscriptionState, metadata, isolationLevel, time, retryBackoffMs, requestTimeoutMs, apiVersions, logContext);
+        this.metadataUpdateCallback = Optional.of(metadataUpdateCallback);
     }
 
     /**
@@ -228,6 +243,7 @@ public class OffsetsRequestManager implements RequestManager, ClusterResourceLis
             requestState.remainingToSearch.clear();
             fetchOffsetsByTimes(timestampsToSearch, requestState.requireTimestamps, requestState);
         });
+        metadataUpdateCallback.ifPresent(MetadataUpdateCallback::call);
     }
 
     /**
@@ -581,5 +597,9 @@ public class OffsetsRequestManager implements RequestManager, ClusterResourceLis
     // Visible for testing
     int requestsToSend() {
         return requestsToSend.size();
+    }
+
+    public interface MetadataUpdateCallback {
+        void call();
     }
 }
