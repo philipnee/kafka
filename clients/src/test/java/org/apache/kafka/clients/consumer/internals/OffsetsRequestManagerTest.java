@@ -623,7 +623,7 @@ public class OffsetsRequestManagerTest {
         final long endOffset = 5L;
         ClientResponse response =
                 buildClientResponseForOffsetsForLeaderEpoch(unsentRequest, TEST_PARTITION_1,
-                        leaderEpoch, endOffset);
+                        leaderEpoch, endOffset, Errors.NONE);
         response.onComplete();
 
         assertEquals(0, requestManager.requestsToSend());
@@ -635,6 +635,38 @@ public class OffsetsRequestManagerTest {
                 epochEndOffsetFromResponse(response);
         verify(subscriptionState).maybeCompleteValidation(TEST_PARTITION_1, currentPosition,
                 expectedEpochEndOffset);
+    }
+
+    @Test
+    public void testValidatePositionsThrowsPreviousException() {
+        when(metadata.updateVersion()).thenReturn(1);
+        final int leaderEpoch = 1;
+        Metadata.LeaderAndEpoch currentLeader = new Metadata.LeaderAndEpoch(Optional.of(LEADER_1), Optional.of(leaderEpoch));
+        SubscriptionState.FetchPosition currentPosition = new SubscriptionState.FetchPosition(1L,
+                Optional.of(1), currentLeader);
+        expectSuccessfulValidatePositionsRequest(TEST_PARTITION_1, currentLeader, currentPosition);
+
+        requestManager.validatePositionsIfNeeded();
+
+        assertEquals(1, requestManager.requestsToSend());
+        NetworkClientDelegate.PollResult res = requestManager.poll(time.milliseconds());
+        NetworkClientDelegate.UnsentRequest unsentRequest = res.unsentRequests.get(0);
+
+        final long endOffset = 5L;
+        ClientResponse response =
+                buildClientResponseForOffsetsForLeaderEpoch(unsentRequest, TEST_PARTITION_1,
+                        leaderEpoch, endOffset, Errors.TOPIC_AUTHORIZATION_FAILED);
+        response.onComplete();
+
+        assertEquals(0, requestManager.requestsToSend());
+        verify(subscriptionState).requestFailed(any(), anyLong());
+        verify(metadata).requestUpdate();
+
+        // Following validatePositions should raise the previous exception without performing any
+        // request
+        assertThrows(TopicAuthorizationException.class,
+                () -> requestManager.validatePositionsIfNeeded());
+        assertEquals(0, requestManager.requestsToSend());
     }
 
     private OffsetForLeaderEpochResponseData.EpochEndOffset epochEndOffsetFromResponse(ClientResponse response) {
@@ -857,11 +889,12 @@ public class OffsetsRequestManagerTest {
             final NetworkClientDelegate.UnsentRequest request,
             TopicPartition topicPartition,
             int leaderEpoch,
-            long endOffset) {
+            long endOffset,
+            Errors error) {
         AbstractRequest abstractRequest = request.requestBuilder().build();
         assertTrue(abstractRequest instanceof OffsetsForLeaderEpochRequest);
         OffsetsForLeaderEpochResponse response =
-                buildOffsetsForLeaderEpochResponse(topicPartition, leaderEpoch, endOffset);
+                buildOffsetsForLeaderEpochResponse(topicPartition, leaderEpoch, endOffset, error);
         return new ClientResponse(
                 new RequestHeader(ApiKeys.OFFSET_FOR_LEADER_EPOCH, ApiKeys.OFFSET_FOR_LEADER_EPOCH.latestVersion(),
                         "",
@@ -877,14 +910,14 @@ public class OffsetsRequestManagerTest {
         );
     }
 
-    private OffsetsForLeaderEpochResponse buildOffsetsForLeaderEpochResponse(TopicPartition partition, int leaderEpoch, long endOffset) {
+    private OffsetsForLeaderEpochResponse buildOffsetsForLeaderEpochResponse(TopicPartition partition, int leaderEpoch, long endOffset, Errors error) {
         OffsetForLeaderEpochResponseData data = new OffsetForLeaderEpochResponseData();
         data.topics().add(new OffsetForLeaderEpochResponseData.OffsetForLeaderTopicResult()
                 .setTopic(partition.topic())
                 .setPartitions(asList(
                         new OffsetForLeaderEpochResponseData.EpochEndOffset()
                                 .setPartition(partition.partition())
-                                .setErrorCode(Errors.NONE.code())
+                                .setErrorCode(error.code())
                                 .setLeaderEpoch(leaderEpoch)
                                 .setEndOffset(endOffset)
                 )));
