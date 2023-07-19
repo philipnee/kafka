@@ -955,8 +955,6 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
     }
 
     private void sendFetches() {
-        backgroundEventProcessor.process();
-
         FetchEvent<K, V> event = new FetchEvent<>();
         eventHandler.add(event);
 
