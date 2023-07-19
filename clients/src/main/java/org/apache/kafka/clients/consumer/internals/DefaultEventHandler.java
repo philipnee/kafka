@@ -40,9 +40,7 @@ import java.util.function.Supplier;
 public class DefaultEventHandler<K, V> implements EventHandler {
 
     private final Logger log;
-    private final Time time;
     private final BlockingQueue<ApplicationEvent> applicationEventQueue;
-    private final BlockingQueue<BackgroundEvent> backgroundEventQueue;
     private final DefaultBackgroundThread<K, V> backgroundThread;
     private final IdempotentCloser closer = new IdempotentCloser();
 
@@ -54,9 +52,7 @@ public class DefaultEventHandler<K, V> implements EventHandler {
                                final Supplier<NetworkClientDelegate> networkClientDelegateSupplier,
                                final Supplier<RequestManagers<K, V>> requestManagersSupplier) {
         this.log = logContext.logger(DefaultEventHandler.class);
-        this.time = time;
         this.applicationEventQueue = applicationEventQueue;
-        this.backgroundEventQueue = backgroundEventQueue;
         this.backgroundThread = new DefaultBackgroundThread<>(time,
                 logContext,
                 applicationEventQueue,
@@ -64,16 +60,6 @@ public class DefaultEventHandler<K, V> implements EventHandler {
                 networkClientDelegateSupplier,
                 requestManagersSupplier);
         this.backgroundThread.start();
-    }
-
-    @Override
-    public Optional<BackgroundEvent> poll() {
-        return Optional.ofNullable(backgroundEventQueue.poll());
-    }
-
-    @Override
-    public boolean isEmpty() {
-        return backgroundEventQueue.isEmpty();
     }
 
     @Override

@@ -36,6 +36,7 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.clients.consumer.internals.events.ApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.ApplicationEventProcessor;
 import org.apache.kafka.clients.consumer.internals.events.BackgroundEvent;
+import org.apache.kafka.clients.consumer.internals.events.BackgroundEventProcessor;
 import org.apache.kafka.clients.consumer.internals.events.CommitApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.EventHandler;
 import org.apache.kafka.clients.consumer.internals.events.ListOffsetsApplicationEvent;
@@ -126,6 +127,7 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
     private final String clientId;
     private final Optional<String> groupId;
     private final EventHandler eventHandler;
+    private final BackgroundEventProcessor backgroundEventProcessor;
     private final Deserializers<K, V> deserializers;
     private final FetchBuffer<K, V> fetchBuffer;
     private final FetchCollector<K, V> fetchCollector;
@@ -233,6 +235,7 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
                     applicationEventProcessorSupplier,
                     networkClientDelegateSupplier,
                     requestManagersSupplier);
+            this.backgroundEventProcessor = new BackgroundEventProcessor(logContext, backgroundEventQueue);
             this.assignors = ConsumerPartitionAssignor.getAssignorInstances(
                     config.getList(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG),
                     config.originals(Collections.singletonMap(ConsumerConfig.CLIENT_ID_CONFIG, clientId))
@@ -277,6 +280,7 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
                                   ConsumerInterceptors<K, V> interceptors,
                                   Time time,
                                   EventHandler eventHandler,
+                                  BlockingQueue<BackgroundEvent> backgroundEventQueue,
                                   Metrics metrics,
                                   SubscriptionState subscriptions,
                                   ConsumerMetadata metadata,
@@ -294,6 +298,7 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
         this.interceptors = Objects.requireNonNull(interceptors);
         this.time = time;
         this.eventHandler = eventHandler;
+        this.backgroundEventProcessor = new BackgroundEventProcessor(logContext, backgroundEventQueue);
         this.metrics = metrics;
         this.subscriptions = subscriptions;
         this.metadata = metadata;
@@ -320,6 +325,8 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
         Timer timer = time.timer(timeout);
 
         try {
+            backgroundEventProcessor.process();
+
             this.kafkaConsumerMetrics.recordPollStart(timer.currentTimeMs());
 
             if (this.subscriptions.hasNoSubscriptionOrUserAssignment()) {
@@ -948,18 +955,7 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
     }
 
     private void sendFetches() {
-        if (!eventHandler.isEmpty()) {
-            final Optional<BackgroundEvent> backgroundEvent = eventHandler.poll();
-            // processEvent() may process 3 types of event:
-            // 1. Errors
-            // 2. Callback Invocation
-            // 3. Fetch responses
-            // Errors will be handled or rethrown.
-            // Callback invocation will trigger callback function execution, which is blocking until completion.
-            // Successful fetch responses will be added to the completedFetches in the fetcher, which will then
-            // be processed in the collectFetches().
-            backgroundEvent.ifPresent(event -> log.warn("Do something with this background event: {}", event));
-        }
+        backgroundEventProcessor.process();
 
         FetchEvent<K, V> event = new FetchEvent<>();
         eventHandler.add(event);

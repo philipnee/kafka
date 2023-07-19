@@ -25,6 +25,7 @@ import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor;
 import org.apache.kafka.clients.consumer.internals.events.ApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.ApplicationEventProcessor;
 import org.apache.kafka.clients.consumer.internals.events.BackgroundEvent;
+import org.apache.kafka.clients.consumer.internals.events.BackgroundEventProcessor;
 import org.apache.kafka.clients.consumer.internals.events.EventHandler;
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.internals.ClusterResourceListeners;
@@ -78,6 +79,7 @@ public class ConsumerTestBuilder implements Closeable {
     final FetchRequestManager<String, String> fetchRequestManager;
     final RequestManagers<String, String> requestManagers;
     final ApplicationEventProcessor<String, String> applicationEventProcessor;
+    final BackgroundEventProcessor backgroundEventProcessor;
     final MockClient client;
 
     private final String topic1 = "test1";
@@ -168,6 +170,7 @@ public class ConsumerTestBuilder implements Closeable {
                 requestManagers,
                 metadata,
                 logContext));
+        this.backgroundEventProcessor = spy(new BackgroundEventProcessor(logContext, backgroundEventQueue));
     }
 
     @Override
@@ -241,6 +244,7 @@ public class ConsumerTestBuilder implements Closeable {
                     new ConsumerInterceptors<>(Collections.emptyList()),
                     time,
                     eventHandler,
+                    backgroundEventQueue,
                     metrics,
                     subscriptions,
                     metadata,
