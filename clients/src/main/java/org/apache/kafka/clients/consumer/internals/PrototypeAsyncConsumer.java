@@ -46,6 +46,7 @@ import org.apache.kafka.clients.consumer.internals.events.OffsetFetchApplication
 import org.apache.kafka.clients.consumer.internals.events.ResetPositionsApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.TopicMetadataApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.UnsubscribeApplicationEvent;
+import org.apache.kafka.clients.consumer.internals.events.ValidatePositionsApplicationEvent;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.KafkaException;
@@ -978,21 +979,21 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
      */
     private boolean updateFetchPositions() {
         // If any partitions have been truncated due to a leader change, we need to validate the offsets
-        ResetPositionsApplicationEvent event = new ResetPositionsApplicationEvent();
-        eventHandler.add(event);
+        ValidatePositionsApplicationEvent validatePositionsEvent = new ValidatePositionsApplicationEvent();
+        eventHandler.add(validatePositionsEvent);
 
         cachedSubscriptionHasAllFetchPositions = subscriptions.hasAllFetchPositions();
         if (cachedSubscriptionHasAllFetchPositions) return true;
 
         // If there are partitions still needing a position and a reset policy is defined,
         // request reset using the default policy. If no reset strategy is defined and there
-        // are partitions with a missing position, then we will raise an exception.
+        // are partitions with a missing position, then we will raise a NoOffsetForPartitionException exception.
         subscriptions.resetInitializingPositions();
 
         // Finally send an asynchronous request to look up and update the positions of any
         // partitions which are awaiting reset.
-        eventHandler.add(event);
-
+        ResetPositionsApplicationEvent resetPositionsEvent = new ResetPositionsApplicationEvent();
+        eventHandler.add(resetPositionsEvent);
         return true;
     }
 
