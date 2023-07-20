@@ -39,14 +39,13 @@ import org.apache.kafka.clients.consumer.internals.events.BackgroundEvent;
 import org.apache.kafka.clients.consumer.internals.events.BackgroundEventProcessor;
 import org.apache.kafka.clients.consumer.internals.events.CommitApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.EventHandler;
+import org.apache.kafka.clients.consumer.internals.events.FetchEvent;
 import org.apache.kafka.clients.consumer.internals.events.ListOffsetsApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.MetadataUpdateApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.OffsetFetchApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.ResetPositionsApplicationEvent;
-import org.apache.kafka.clients.consumer.internals.events.UnsubscribeApplicationEvent;
-import org.apache.kafka.clients.consumer.internals.events.FetchEvent;
-import org.apache.kafka.clients.consumer.internals.events.ValidatePositionsApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.TopicMetadataApplicationEvent;
+import org.apache.kafka.clients.consumer.internals.events.UnsubscribeApplicationEvent;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.KafkaException;
@@ -334,7 +333,7 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
             }
 
             do {
-                updateAssignmentMetadataIfNeeded(timer);
+                updateAssignmentMetadataIfNeeded();
                 final Fetch<K, V> fetch = pollForFetches(timer);
 
                 if (!fetch.isEmpty()) {
@@ -354,39 +353,6 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
         } finally {
             this.kafkaConsumerMetrics.recordPollEnd(timer.currentTimeMs());
         }
-    }
-
-    boolean updateAssignmentMetadataIfNeeded() {
-        // Keeping this updateAssignmentMetadataIfNeeded wrapping up the updateFetchPositions as
-        // in the previous implementation, because it will eventually involve group coordination
-        // logic
-        return updateFetchPositions();
-    }
-
-    /**
-     * Set the fetch position to the committed position (if there is one)
-     * or reset it using the offset reset policy the user has configured.
-     *
-     * @return true if the operation completed without timing out
-     * @throws org.apache.kafka.common.errors.AuthenticationException if authentication fails. See the exception for more details
-     * @throws NoOffsetForPartitionException                          If no offset is stored for a given partition and no offset reset policy is
-     *                                                                defined
-     */
-    private boolean updateFetchPositions() {
-        // If any partitions have been truncated due to a leader change, we need to validate the offsets
-        ValidatePositionsApplicationEvent validatePositionsEvent = new ValidatePositionsApplicationEvent();
-        eventHandler.add(validatePositionsEvent);
-
-        // If there are partitions still needing a position and a reset policy is defined,
-        // request reset using the default policy. If no reset strategy is defined and there
-        // are partitions with a missing position, then we will raise a NoOffsetForPartitionException exception.
-        subscriptions.resetInitializingPositions();
-
-        // Finally send an asynchronous request to look up and update the positions of any
-        // partitions which are awaiting reset.
-        ResetPositionsApplicationEvent resetPositionsEvent = new ResetPositionsApplicationEvent();
-        eventHandler.add(resetPositionsEvent);
-        return true;
     }
 
     /**
@@ -504,7 +470,7 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
             if (position != null)
                 return position.offset;
 
-            updateFetchPositions(timer);
+            updateFetchPositions();
         } while (timer.notExpired());
 
         throw new TimeoutException("Timeout of " + timeout.toMillis() + "ms expired before the position " +
@@ -1008,9 +974,9 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
      * @throws org.apache.kafka.common.errors.AuthenticationException if authentication fails. See the exception for more details
      * @throws NoOffsetForPartitionException If no offset is stored for a given partition and no offset reset policy is
      *             defined
-     * @return true iff the operation completed without timing out
+     * @return true if the operation completed without timing out
      */
-    private boolean updateFetchPositions(final Timer timer) {
+    private boolean updateFetchPositions() {
         // If any partitions have been truncated due to a leader change, we need to validate the offsets
         ResetPositionsApplicationEvent event = new ResetPositionsApplicationEvent();
         eventHandler.add(event);
@@ -1071,7 +1037,10 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
         return clientId;
     }
 
-    boolean updateAssignmentMetadataIfNeeded(final Timer timer) {
-        return updateFetchPositions(timer);
+    boolean updateAssignmentMetadataIfNeeded() {
+        // Keeping this updateAssignmentMetadataIfNeeded wrapping up the updateFetchPositions as
+        // in the previous implementation, because it will eventually involve group coordination
+        // logic
+        return updateFetchPositions();
     }
 }
