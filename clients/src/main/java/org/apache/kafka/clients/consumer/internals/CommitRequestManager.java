@@ -92,7 +92,7 @@ public class CommitRequestManager implements RequestManager {
      */
     @Override
     public NetworkClientDelegate.PollResult poll(final long currentTimeMs) {
-        maybeAutoCommit();
+        maybeAutoCommit(this.subscriptionState.allConsumed());
         if (!pendingRequests.hasUnsentRequests()) {
             return new NetworkClientDelegate.PollResult(Long.MAX_VALUE, Collections.emptyList());
         }
@@ -102,7 +102,7 @@ public class CommitRequestManager implements RequestManager {
                 Collections.unmodifiableList(pendingRequests.drain(currentTimeMs)));
     }
 
-    private void maybeAutoCommit() {
+    public void maybeAutoCommit(final Map<TopicPartition, OffsetAndMetadata> offsets) {
         if (!autoCommitState.isPresent()) {
             return;
         }

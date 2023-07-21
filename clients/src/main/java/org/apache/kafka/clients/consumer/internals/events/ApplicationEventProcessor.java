@@ -75,7 +75,7 @@ public class ApplicationEventProcessor<K, V> {
             case FETCH_COMMITTED_OFFSET:
                 return process((OffsetFetchApplicationEvent) event);
             case METADATA_UPDATE:
-                return process((MetadataUpdateApplicationEvent) event);
+                return process((NewTopicsMetadataUpdateRequestEvent) event);
             case TOPIC_METADATA:
                 return process((TopicMetadataApplicationEvent) event);
             case UNSUBSCRIBE:
@@ -88,6 +88,8 @@ public class ApplicationEventProcessor<K, V> {
                 return process((ResetPositionsApplicationEvent) event);
             case VALIDATE_POSITIONS:
                 return process((ValidatePositionsApplicationEvent) event);
+            case ASSIGNMENT_CHANGE:
+                return process((AssignmentChangeApplicationEvent) event);
         }
         return false;
     }
