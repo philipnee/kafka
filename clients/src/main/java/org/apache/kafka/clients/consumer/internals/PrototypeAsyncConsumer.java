@@ -975,7 +975,7 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
      * @throws org.apache.kafka.common.errors.AuthenticationException if authentication fails. See the exception for more details
      * @throws NoOffsetForPartitionException If no offset is stored for a given partition and no offset reset policy is
      *             defined
-     * @return true if the operation completed without timing out
+     * @return true iff the operation completed without timing out
      */
     private boolean updateFetchPositions() {
         // If any partitions have been truncated due to a leader change, we need to validate the offsets
