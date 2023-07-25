@@ -112,8 +112,7 @@ public class CommitRequestManager implements RequestManager {
             return;
         }
 
-        Map<TopicPartition, OffsetAndMetadata> allConsumedOffsets = subscriptions.allConsumed();
-        sendAutoCommit(allConsumedOffsets);
+        sendAutoCommit(offsets);
         autocommit.resetTimer();
         autocommit.setInflightCommitStatus(true);
     }

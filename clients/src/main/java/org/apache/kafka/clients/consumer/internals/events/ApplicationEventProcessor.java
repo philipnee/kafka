@@ -205,6 +205,16 @@ public class ApplicationEventProcessor<K, V> {
         return true;
     }
 
+    private boolean process(final AssignmentChangeApplicationEvent event) {
+        if (!requestManagers.commitRequestManager.isPresent()) {
+            return false;
+        }
+        CommitRequestManager manager = requestManagers.commitRequestManager.get();
+        manager.updateAutoCommitTimer(event.currentTimeMs);
+        manager.maybeAutoCommit(event.offsets);
+        return true;
+    }
+
     /**
      * Creates a {@link Supplier} for deferred creation during invocation by
      * {@link org.apache.kafka.clients.consumer.internals.DefaultBackgroundThread}.
