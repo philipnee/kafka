@@ -23,7 +23,7 @@ import org.apache.kafka.clients.consumer.internals.events.ApplicationEventProces
 import org.apache.kafka.clients.consumer.internals.events.AssignmentChangeApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.CommitApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.ListOffsetsApplicationEvent;
-import org.apache.kafka.clients.consumer.internals.events.MetadataUpdateApplicationEvent;
+import org.apache.kafka.clients.consumer.internals.events.NewTopicsMetadataUpdateRequestEvent;
 import org.apache.kafka.clients.consumer.internals.events.NoopApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.ResetPositionsApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.TopicMetadataApplicationEvent;
@@ -133,7 +133,7 @@ public class DefaultBackgroundThreadTest {
     public void testMetadataUpdateEvent() {
         when(coordinatorManager.poll(anyLong())).thenReturn(mockPollCoordinatorResult());
         when(commitManager.poll(anyLong())).thenReturn(mockPollCommitResult());
-        ApplicationEvent e = new MetadataUpdateApplicationEvent(time.milliseconds());
+        ApplicationEvent e = new NewTopicsMetadataUpdateRequestEvent();
         this.applicationEventsQueue.add(e);
         backgroundThread.runOnce();
         verify(metadata).requestUpdateForNewTopics();

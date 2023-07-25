@@ -39,14 +39,14 @@ import org.apache.kafka.clients.consumer.internals.events.BackgroundEvent;
 import org.apache.kafka.clients.consumer.internals.events.BackgroundEventProcessor;
 import org.apache.kafka.clients.consumer.internals.events.CommitApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.EventHandler;
+import org.apache.kafka.clients.consumer.internals.events.FetchEvent;
 import org.apache.kafka.clients.consumer.internals.events.ListOffsetsApplicationEvent;
-import org.apache.kafka.clients.consumer.internals.events.MetadataUpdateApplicationEvent;
+import org.apache.kafka.clients.consumer.internals.events.NewTopicsMetadataUpdateRequestEvent;
 import org.apache.kafka.clients.consumer.internals.events.OffsetFetchApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.ResetPositionsApplicationEvent;
-import org.apache.kafka.clients.consumer.internals.events.UnsubscribeApplicationEvent;
-import org.apache.kafka.clients.consumer.internals.events.FetchEvent;
-import org.apache.kafka.clients.consumer.internals.events.ValidatePositionsApplicationEvent;
 import org.apache.kafka.clients.consumer.internals.events.TopicMetadataApplicationEvent;
+import org.apache.kafka.clients.consumer.internals.events.UnsubscribeApplicationEvent;
+import org.apache.kafka.clients.consumer.internals.events.ValidatePositionsApplicationEvent;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.KafkaException;
@@ -896,11 +896,11 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
 
         log.info("Assigned to partition(s): {}", join(partitions, ", "));
         if (this.subscriptions.assignFromUser(new HashSet<>(partitions)))
-           updateMetadata(time.milliseconds());
+           updateMetadata();
     }
 
-    private void updateMetadata(long milliseconds) {
-        final MetadataUpdateApplicationEvent event = new MetadataUpdateApplicationEvent(milliseconds);
+    private void updateMetadata() {
+        final NewTopicsMetadataUpdateRequestEvent event = new NewTopicsMetadataUpdateRequestEvent();
         eventHandler.add(event);
     }
 

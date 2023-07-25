@@ -148,7 +148,7 @@ public class ApplicationEventProcessor<K, V> {
         return true;
     }
 
-    private boolean process(final MetadataUpdateApplicationEvent event) {
+    private boolean process(final NewTopicsMetadataUpdateRequestEvent event) {
         metadata.requestUpdateForNewTopics();
         return true;
     }
