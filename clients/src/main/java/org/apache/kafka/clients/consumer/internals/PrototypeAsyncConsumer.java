@@ -985,6 +985,8 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
         cachedSubscriptionHasAllFetchPositions = subscriptions.hasAllFetchPositions();
         if (cachedSubscriptionHasAllFetchPositions) return true;
 
+        // TODO: integrate committed offsets related logic when supporting Kafka-based offsets management
+
         // If there are partitions still needing a position and a reset policy is defined,
         // request reset using the default policy. If no reset strategy is defined and there
         // are partitions with a missing position, then we will raise a NoOffsetForPartitionException exception.
