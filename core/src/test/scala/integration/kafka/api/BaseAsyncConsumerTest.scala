@@ -17,10 +17,16 @@
 package kafka.api
 
 import kafka.utils.TestUtils.waitUntilTrue
+import org.junit.jupiter.api.Assertions.{assertNull}
 import org.junit.jupiter.api.Test
+
+import java.time.Duration
+import scala.jdk.CollectionConverters._
 
 
 class BaseAsyncConsumerTest extends AbstractConsumerTest {
+  val defaultBlockingAPITimeoutMs = 1000
+
   @Test
   def testCommitAsync(): Unit = {
     val consumer = createAsyncConsumer()
@@ -32,7 +38,9 @@ class BaseAsyncConsumerTest extends AbstractConsumerTest {
     consumer.commitAsync(cb)
     waitUntilTrue(() => {
       cb.successCount == 1
-    }, "wait until commit is completed successfully", 5000)
+    }, "wait until commit is completed successfully", defaultBlockingAPITimeoutMs)
+    assertNull(consumer.committed(Set(tp).asJava, Duration.ofMillis(defaultBlockingAPITimeoutMs)).get(tp))
+
   }
 
   @Test
@@ -42,6 +50,7 @@ class BaseAsyncConsumerTest extends AbstractConsumerTest {
     val numRecords = 10000
     val startingTimestamp = System.currentTimeMillis()
     sendRecords(producer, numRecords, tp, startingTimestamp = startingTimestamp)
-    consumer.commitSync();
+    consumer.commitSync()
+    assertNull(consumer.committed(Set(tp).asJava, Duration.ofMillis(defaultBlockingAPITimeoutMs)).get(tp))
   }
 }
