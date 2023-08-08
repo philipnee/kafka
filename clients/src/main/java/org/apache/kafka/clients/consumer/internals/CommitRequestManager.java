@@ -269,7 +269,7 @@ public class CommitRequestManager implements RequestManager {
         private void onFailure(final long currentTimeMs,
                                final Errors responseError) {
             log.debug("Offset fetch failed: {}", responseError.message());
-
+            requestState.onFailedAttempt(currentTimeMs);
             // TODO: should we retry on COORDINATOR_NOT_AVAILABLE as well ?
             if (responseError == Errors.COORDINATOR_LOAD_IN_PROGRESS) {
                 retry(currentTimeMs);
@@ -292,6 +292,7 @@ public class CommitRequestManager implements RequestManager {
 
         private void onSuccess(final long currentTimeMs,
                                final OffsetFetchResponse response) {
+            requestState.onSuccessfulAttempt(currentTimeMs);
             Set<String> unauthorizedTopics = null;
             Map<TopicPartition, OffsetFetchResponse.PartitionData> responseData =
                     response.partitionDataMap(groupState.groupId);
