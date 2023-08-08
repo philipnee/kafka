@@ -21,7 +21,7 @@ import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.common.PartitionInfo
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.{assertNotNull, assertNull, assertTrue}
-import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.{Disabled, Test}
 
 import java.time.Duration
 import scala.collection.mutable
@@ -86,6 +86,30 @@ class BaseAsyncConsumerTest extends AbstractConsumerTest {
     assertNotNull(committedOffset)
     assertNotNull(committedOffset.get(tp))
     assertEquals(numRecords, committedOffset.get(tp).offset())
+  }
+  @Disabled
+  @Test
+  def testRetrievingCommittedOffsetsMultipleConsumers(): Unit = {
+    val numRecords = 100
+    val startingTimestamp = System.currentTimeMillis()
+    val producer = createProducer()
+    sendRecords(producer, numRecords, tp, startingTimestamp = startingTimestamp)
+
+    val consumer = createConsumer()
+    consumer.assign(List(tp).asJava)
+
+    // First consumer consumes and commits offsets
+    consumer.seek(tp, 0)
+    consumeAndVerifyRecords(consumer = consumer, numRecords, startingOffset = 0,
+      startingTimestamp = startingTimestamp)
+    consumer.commitSync()
+    assertEquals(numRecords, consumer.committed(Set(tp).asJava).get(tp).offset)
+    consumer.close()
+
+    // We should see the committed offsets from another consumer
+    val anotherConsumer = createConsumer()
+    anotherConsumer.assign(List(tp).asJava)
+    assertEquals(numRecords, anotherConsumer.committed(Set(tp).asJava).get(tp).offset)
   }
 
   @Test
