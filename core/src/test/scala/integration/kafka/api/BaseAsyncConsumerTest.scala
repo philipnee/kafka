@@ -104,11 +104,9 @@ class BaseAsyncConsumerTest extends AbstractConsumerTest {
       startingTimestamp = startingTimestamp)
     consumer.commitSync()
     assertEquals(numRecords, consumer.committed(Set(tp).asJava).get(tp).offset)
-    consumer.close()
 
     // We should see the committed offsets from another consumer
     val anotherConsumer = createConsumer()
-    anotherConsumer.assign(List(tp).asJava)
     assertEquals(numRecords, anotherConsumer.committed(Set(tp).asJava).get(tp).offset)
   }
 
