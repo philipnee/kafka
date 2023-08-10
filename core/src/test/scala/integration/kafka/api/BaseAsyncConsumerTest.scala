@@ -146,7 +146,7 @@ class BaseAsyncConsumerTest extends AbstractConsumerTest {
   }
 
   @Test
-  def testConsumeFromCommittedOffsets(): Unit = {
+  def testFetchCommittedOffsets(): Unit = {
     val numRecords = 100
     val startingTimestamp = System.currentTimeMillis()
     val producer = createProducer()
