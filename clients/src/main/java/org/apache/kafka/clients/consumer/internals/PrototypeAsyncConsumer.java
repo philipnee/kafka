@@ -518,7 +518,7 @@ public class PrototypeAsyncConsumer<K, V> implements Consumer<K, V> {
     }
 
     private void maybeThrowInvalidGroupIdException() {
-        if (!groupId.isPresent()) {
+        if (!groupId.isPresent() || groupId.get().isEmpty()) {
             throw new InvalidGroupIdException("To use the group management or offset commit APIs, you must " +
                     "provide a valid " + ConsumerConfig.GROUP_ID_CONFIG + " in the consumer configuration.");
         }
