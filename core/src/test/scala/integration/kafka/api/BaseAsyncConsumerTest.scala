@@ -18,8 +18,9 @@ package kafka.api
 
 import kafka.utils.TestUtils.waitUntilTrue
 import org.apache.kafka.clients.consumer.{ConsumerConfig, OffsetAndMetadata}
+import org.apache.kafka.common.errors.InvalidGroupIdException
 import org.apache.kafka.common.{PartitionInfo, TopicPartition}
-import org.junit.jupiter.api.Assertions.{assertEquals, assertNotNull, assertNull, assertTrue}
+import org.junit.jupiter.api.Assertions.{assertEquals, assertNotNull, assertNull, assertThrows, assertTrue}
 import org.junit.jupiter.api.{Disabled, Test}
 
 import java.time.Duration
@@ -229,5 +230,14 @@ class BaseAsyncConsumerTest extends AbstractConsumerTest {
     anotherConsumer.assign(List(tp, tp2).asJava)
     assertEquals(300, anotherConsumer.committed(Set(tp).asJava).get(tp).offset)
     assertEquals(500, anotherConsumer.committed(Set(tp2).asJava).get(tp2).offset)
+  }
+
+  @Test
+  def testEmptyGroupNotSupported(): Unit = {
+    // This replaces the existing testConsumingWithEmptyGroupId, given that empty group ID is not
+    // supported in the new consumer implementation
+    val consumer = createConsumerWithGroupId("")
+    consumer.assign(List(tp).asJava)
+    assertThrows(classOf[InvalidGroupIdException], () => consumer.commitSync())
   }
 }
