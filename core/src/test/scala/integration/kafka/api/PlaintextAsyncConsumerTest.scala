@@ -1907,7 +1907,7 @@ class PlaintextAsyncConsumer extends BaseConsumerTest {
     assertEquals(2, numRecords3, "Expected consumer3 to consume from offset 1")
   }
 
-  @Disabled("Needs review for async consumer - flaky")
+  @Disabled("Not supported by async consumer")
   @Test
   def testConsumingWithEmptyGroupId(): Unit = {
     val topic = "test_topic"
