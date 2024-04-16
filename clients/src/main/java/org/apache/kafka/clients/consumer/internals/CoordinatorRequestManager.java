@@ -94,14 +94,18 @@ public class CoordinatorRequestManager implements RequestManager {
      */
     @Override
     public NetworkClientDelegate.PollResult poll(final long currentTimeMs) {
-        if (this.coordinator != null)
+        if (this.coordinator != null) {
             return EMPTY;
+        }
 
         if (coordinatorRequestState.canSendRequest(currentTimeMs)) {
             NetworkClientDelegate.UnsentRequest request = makeFindCoordinatorRequest(currentTimeMs);
+            System.out.println("can send");
+            coordinatorRequestState.onSendAttempt(currentTimeMs);
             return new NetworkClientDelegate.PollResult(request);
         }
 
+        System.out.println("backoff:" + coordinatorRequestState.remainingBackoffMs(currentTimeMs));
         return new NetworkClientDelegate.PollResult(coordinatorRequestState.remainingBackoffMs(currentTimeMs));
     }
 

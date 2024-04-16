@@ -33,6 +33,8 @@ class RequestState {
     protected long backoffMs = 0;
     private boolean requestInFlight = false;
 
+    private boolean requestInFlight = false;
+
     public RequestState(final LogContext logContext,
                         final String owner,
                         final long retryBackoffMs,
@@ -102,7 +104,7 @@ class RequestState {
         this.requestInFlight = true;
 
         // Here we update the timer everytime we try to send a request.
-        this.lastSentMs = currentTimeMs;
+        this.requestInFlight = true;
     }
 
     /**
