@@ -21,6 +21,7 @@ import org.apache.kafka.clients.consumer.internals.ConsumerUtils;
 import org.apache.kafka.clients.consumer.internals.NetworkClientDelegate;
 import org.apache.kafka.clients.consumer.internals.RequestManagers;
 import org.apache.kafka.common.internals.IdempotentCloser;
+import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Timer;
@@ -51,14 +52,16 @@ public class ApplicationEventHandler implements Closeable {
                                    final BlockingQueue<ApplicationEvent> applicationEventQueue,
                                    final Supplier<ApplicationEventProcessor> applicationEventProcessorSupplier,
                                    final Supplier<NetworkClientDelegate> networkClientDelegateSupplier,
-                                   final Supplier<RequestManagers> requestManagersSupplier) {
+                                   final Supplier<RequestManagers> requestManagersSupplier,
+                                   final Metrics metrics) {
         this.log = logContext.logger(ApplicationEventHandler.class);
         this.applicationEventQueue = applicationEventQueue;
         this.networkThread = new ConsumerNetworkThread(logContext,
                 time,
                 applicationEventProcessorSupplier,
                 networkClientDelegateSupplier,
-                requestManagersSupplier);
+                requestManagersSupplier,
+                metrics);
         this.networkThread.start();
     }
 

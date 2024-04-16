@@ -127,6 +127,29 @@ class PlaintextConsumerCommitTest extends AbstractConsumerTest {
     assertEquals(None, callback.lastError)
     assertEquals(count, callback.successCount)
     assertEquals(new OffsetAndMetadata(count), consumer.committed(Set(tp).asJava).get(tp))
+    val i = consumer.metrics().asScala.iterator
+    while (i.hasNext) {
+      val metric = i.next()
+      if (metric._1.name().contains("poll-time-avg")) {
+        println("poll time avg:" + metric._2.metricValue())
+      }
+
+      if (metric._1.name().contains("poll-time-max")) {
+        println("poll time max", metric._2.metricValue())
+      }
+
+      if (metric._1.name().contains("backoff-time-avg")) {
+        println("backoff time avg:" + metric._2.metricValue())
+      }
+
+      if (metric._1.name().contains("backoff-time-max")) {
+        println("backoff time max", metric._2.metricValue())
+      }
+
+      if (metric._1.name().contains("no-backoff")) {
+        println("no backoff freq", metric._2.metricValue())
+      }
+    }
   }
 
   @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumAndGroupProtocolNames)
