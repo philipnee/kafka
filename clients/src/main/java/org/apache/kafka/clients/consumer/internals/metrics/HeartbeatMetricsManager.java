@@ -20,6 +20,7 @@ import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.metrics.Measurable;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.metrics.Sensor;
+import org.apache.kafka.common.metrics.stats.Avg;
 import org.apache.kafka.common.metrics.stats.Max;
 import org.apache.kafka.common.metrics.stats.Meter;
 import org.apache.kafka.common.metrics.stats.WindowedCount;
@@ -36,6 +37,7 @@ public class HeartbeatMetricsManager {
     final MetricName heartbeatTotal;
     final MetricName lastHeartbeatSecondsAgo;
     private final Sensor heartbeatSensor;
+    private final Sensor heartbeatPollSensor;
     private long lastHeartbeatMs = -1L;
 
     public HeartbeatMetricsManager(Metrics metrics) {
@@ -65,6 +67,12 @@ public class HeartbeatMetricsManager {
             metricGroupName,
             "The number of seconds since the last coordinator heartbeat was sent");
         metrics.addMetric(lastHeartbeatSecondsAgo, lastHeartbeat);
+
+        heartbeatPollSensor = metrics.sensor("heartbeat-poll-latency");
+        MetricName heartbeatPollTimeAvg = metrics.metricName("heartbeat-poll-time-avg",
+            "poll-metrics",
+            "The avg time taken for a heartbeat poll request");
+        heartbeatPollSensor.add(heartbeatPollTimeAvg, new Avg());
     }
 
     public void recordHeartbeatSentMs(long timeMs) {

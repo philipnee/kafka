@@ -21,6 +21,7 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.metrics.Gauge;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.metrics.Sensor;
+import org.apache.kafka.common.metrics.stats.Avg;
 import org.apache.kafka.common.metrics.stats.WindowedCount;
 
 import java.util.Collections;
@@ -44,6 +45,7 @@ public class FetchMetricsManager {
     private final Sensor recordsLag;
     private final Sensor recordsLead;
 
+    private Sensor fetchPollTimeSensor;
     private int assignmentId = 0;
     private Set<TopicPartition> assignedPartitions = Collections.emptySet();
 
@@ -75,6 +77,16 @@ public class FetchMetricsManager {
         this.recordsLead = new SensorBuilder(metrics, "records-lead")
                 .withMin(metricsRegistry.recordsLeadMin)
                 .build();
+
+        MetricName fetchPollTimeAvg = metrics.metricName("fetch-poll-time-avg",
+            "poll-metrics",
+            "average fetch poll time");
+        fetchPollTimeSensor = metrics.sensor("fetch-poll-time");
+        fetchPollTimeSensor.add(fetchPollTimeAvg, new Avg());
+    }
+
+    public void recordPollTime(long pollTime) {
+        fetchPollTimeSensor.record(pollTime);
     }
 
     public Sensor throttleTimeSensor() {

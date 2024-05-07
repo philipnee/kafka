@@ -66,6 +66,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.kafka.clients.consumer.internals.ConsumerUtils.THROW_ON_FETCH_STABLE_OFFSET_UNSUPPORTED;
 import static org.apache.kafka.clients.consumer.internals.NetworkClientDelegate.PollResult.EMPTY;
+import static org.apache.kafka.clients.consumer.internals.NetworkClientDelegate.PollResult.WAIT_FOREVER;
 import static org.apache.kafka.common.protocol.Errors.COORDINATOR_LOAD_IN_PROGRESS;
 
 public class CommitRequestManager implements RequestManager, MemberStateListener {
@@ -163,22 +164,28 @@ public class CommitRequestManager implements RequestManager, MemberStateListener
     @Override
     public NetworkClientDelegate.PollResult poll(final long currentTimeMs) {
         // poll only when the coordinator node is known.
-        if (!coordinatorRequestManager.coordinator().isPresent())
+        if (!coordinatorRequestManager.coordinator().isPresent()) {
+            metricsManager.recordPoll(WAIT_FOREVER);
             return EMPTY;
+        }
 
         if (closing) {
+            metricsManager.recordPoll(WAIT_FOREVER);
             return drainPendingOffsetCommitRequests();
         }
 
         maybeAutoCommitAsync();
-        if (!pendingRequests.hasUnsentRequests())
+        if (!pendingRequests.hasUnsentRequests()) {
+            metricsManager.recordPoll(WAIT_FOREVER);
             return EMPTY;
+        }
 
         List<NetworkClientDelegate.UnsentRequest> requests = pendingRequests.drain(currentTimeMs);
         // min of the remainingBackoffMs of all the request that are still backing off
         final long timeUntilNextPoll = Math.min(
             findMinTime(unsentOffsetCommitRequests(), currentTimeMs),
             findMinTime(unsentOffsetFetchRequests(), currentTimeMs));
+        metricsManager.recordPoll(timeUntilNextPoll);
         return new NetworkClientDelegate.PollResult(timeUntilNextPoll, requests);
     }
 

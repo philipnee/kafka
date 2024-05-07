@@ -33,8 +33,6 @@ class RequestState {
     protected long backoffMs = 0;
     private boolean requestInFlight = false;
 
-    private boolean requestInFlight = false;
-
     public RequestState(final LogContext logContext,
                         final String owner,
                         final long retryBackoffMs,

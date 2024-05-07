@@ -31,6 +31,9 @@ public class NetworkThreadMetrics {
     private Sensor pollTimeSensor;
 
     private Sensor backoffTimeSensor;
+    private Sensor heartbeatPollTimeSensor;
+    private Sensor coordinatorPollTimeSensor;
+    private Sensor commitPollTimeSensor;
     private final Metrics metrics;
 
     public NetworkThreadMetrics(Metrics metrics) {
@@ -68,6 +71,20 @@ public class NetworkThreadMetrics {
 
         backoffTimeSensor.add(backoffTimeAvg, new Avg());
         backoffTimeSensor.add(backoffTimeMax, new Max());
+
+        MetricName coordinatorPollTimeAvg = metrics.metricName("coordinator-poll-time-avg",
+            metricGroupName,
+            "average coordinator poll time");
+        MetricName commitPollTimeAvg = metrics.metricName("commit-poll-time-avg",
+            metricGroupName,
+            "average commit poll time");
+        MetricName hbPollTimeAvg = metrics.metricName("hb-poll-time-avg",
+            metricGroupName,
+            "average hb poll time");
+
+        commitPollTimeSensor.add(commitPollTimeAvg, new Avg());
+        coordinatorPollTimeSensor.add(coordinatorPollTimeAvg, new Avg());
+        heartbeatPollTimeSensor.add(hbPollTimeAvg, new Avg());
     }
 
     public void recordPollTime(long pollTimeMs) {
@@ -76,5 +93,17 @@ public class NetworkThreadMetrics {
 
     public void recordBackoffTime(long waitTime) {
         backoffTimeSensor.record(waitTime);
+    }
+
+    public void recordCoordinatorPollTime(long pollTimeMs) {
+        coordinatorPollTimeSensor.record(pollTimeMs);
+    }
+
+    public void recordCommitPollTime(long pollTimeMs) {
+        commitPollTimeSensor.record(pollTimeMs);
+    }
+
+    public void recordHeartbeatPollTime(long pollTimeMs) {
+        heartbeatPollTimeSensor.record(pollTimeMs);
     }
 }
