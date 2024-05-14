@@ -134,19 +134,19 @@ public class Consumer extends Thread implements ConsumerRebalanceListener {
         // consumer group id is required when we use subscribe(topics) for group management
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         // sets static membership to improve availability (e.g. rolling restart)
-        instanceId.ifPresent(id -> props.put(ConsumerConfig.GROUP_INSTANCE_ID_CONFIG, id));
-        // disables auto commit when EOS is enabled, because offsets are committed with the transaction
-        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, readCommitted ? "false" : "true");
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");
         // key and value are just byte arrays, so we need to set appropriate deserializers
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, IntegerDeserializer.class);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        props.put(ConsumerConfig.GROUP_PROTOCOL_CONFIG, GroupProtocol.CONSUMER);
-        if (readCommitted) {
-            // skips ongoing and aborted transactions
-            props.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
-        }
+        props.put(ConsumerConfig.GROUP_PROTOCOL_CONFIG, GroupProtocol.CONSUMER.name());
         // sets the reset offset policy in case of invalid or no offset
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        props.put("security.protocol", "SASL_SSL");
+        props.put("sasl.mechanism", "PLAIN");
+        props.put("sasl.jaas.config",
+            "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"" + KafkaProperties.key + "\" " +
+                "password=\"" + KafkaProperties.secret + "\";");
+
         return new KafkaConsumer<>(props);
     }
 

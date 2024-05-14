@@ -124,6 +124,12 @@ public class Producer extends Thread {
         }
         // enable duplicates protection at the partition level
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, enableIdempotency);
+        props.put("security.protocol", "SASL_SSL");
+        props.put("sasl.mechanism", "PLAIN");
+        props.put("sasl.jaas.config",
+            "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"" + KafkaProperties.key + "\" " +
+                "password=\"" + KafkaProperties.secret + "\";");
+
         return new KafkaProducer<>(props);
     }
 

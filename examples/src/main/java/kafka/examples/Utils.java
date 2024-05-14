@@ -69,6 +69,12 @@ public class Utils {
         Properties props = new Properties();
         props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(AdminClientConfig.CLIENT_ID_CONFIG, "client-" + UUID.randomUUID());
+        props.put("security.protocol", "SASL_SSL");
+        props.put("sasl.mechanism", "PLAIN");
+        props.put("sasl.jaas.config",
+            "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"" + KafkaProperties.key + "\" " +
+                "password=\"" + KafkaProperties.secret + "\";");
+
         try (Admin admin = Admin.create(props)) {
             // delete topics if present
             try {
