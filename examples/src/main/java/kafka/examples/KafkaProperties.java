@@ -18,6 +18,8 @@ package kafka.examples;
 
 public class KafkaProperties {
     public static final String BOOTSTRAP_SERVERS = "localhost:9092";
+    public static final String key = "WZNJTX62V2H5ZM43";
+    public static final String secret = "3wwXJqBNyvZzhYA3K/f4vYOWLcMeGzb7MUdLwkkGGB9MR0k8dCAs295dQz1nHcD4";
 
     private KafkaProperties() {}
 }
