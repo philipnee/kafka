@@ -31,9 +31,8 @@ public class NetworkThreadMetrics {
     private Sensor pollTimeSensor;
 
     private Sensor backoffTimeSensor;
-    private Sensor heartbeatPollTimeSensor;
-    private Sensor coordinatorPollTimeSensor;
-    private Sensor commitPollTimeSensor;
+
+    private Sensor requestManagerPollSensor;
     private final Metrics metrics;
 
     public NetworkThreadMetrics(Metrics metrics) {
@@ -82,9 +81,29 @@ public class NetworkThreadMetrics {
             metricGroupName,
             "average hb poll time");
 
-        commitPollTimeSensor.add(commitPollTimeAvg, new Avg());
-        coordinatorPollTimeSensor.add(coordinatorPollTimeAvg, new Avg());
-        heartbeatPollTimeSensor.add(hbPollTimeAvg, new Avg());
+        requestManagerPollSensor = metrics.sensor("poll-time-sensor");
+        MetricName pta = metrics.metricName("poll-time-avg",
+            metricGroupName,
+            "The average time taken for a poll request");
+
+        MetricName ptm = metrics.metricName("poll-time-max",
+            metricGroupName,
+            "The max time taken for a poll request");
+
+        MetricName ztm = metrics.metricName("zero-poll-time",
+            metricGroupName,
+            "The number of time poll time returns zero");
+
+        MetricName mtm = metrics.metricName("max-poll-time",
+            metricGroupName,
+            "The number of time poll time returns max value");
+
+        requestManagerPollSensor.add(pta, new Avg());
+        requestManagerPollSensor.add(ptm, new Max());
+        requestManagerPollSensor.add(new Frequencies(2, 0, Long.MAX_VALUE,
+            new Frequency(ztm, 0),
+            new Frequency(mtm, Long.MAX_VALUE)));
+
     }
 
     public void recordPollTime(long pollTimeMs) {
@@ -96,14 +115,12 @@ public class NetworkThreadMetrics {
     }
 
     public void recordCoordinatorPollTime(long pollTimeMs) {
-        coordinatorPollTimeSensor.record(pollTimeMs);
+        requestManagerPollSensor.record(pollTimeMs);
     }
 
     public void recordCommitPollTime(long pollTimeMs) {
-        commitPollTimeSensor.record(pollTimeMs);
     }
 
     public void recordHeartbeatPollTime(long pollTimeMs) {
-        heartbeatPollTimeSensor.record(pollTimeMs);
     }
 }
