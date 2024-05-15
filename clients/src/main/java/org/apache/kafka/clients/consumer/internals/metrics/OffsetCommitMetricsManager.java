@@ -33,7 +33,6 @@ public class OffsetCommitMetricsManager {
     final MetricName commitRate;
     final MetricName commitTotal;
     private final Sensor commitSensor;
-    private final Sensor pollTimeSensor;
 
     public OffsetCommitMetricsManager(Metrics metrics) {
         final String metricGroupName = CONSUMER_METRIC_GROUP_PREFIX + COORDINATOR_METRICS_SUFFIX;
@@ -55,16 +54,6 @@ public class OffsetCommitMetricsManager {
         commitSensor.add(new Meter(new WindowedCount(),
             commitRate,
             commitTotal));
-
-        pollTimeSensor = metrics.sensor("poll-time");
-        MetricName pollTimeAvg = metrics.metricName("poll-time-avg",
-            "poll-metrics",
-            "The average time taken for a poll request");
-        pollTimeSensor.add(pollTimeAvg, new Avg());
-    }
-
-    public void recordPoll(long responseLatencyMs) {
-        this.pollTimeSensor.record(responseLatencyMs);
     }
 
     public void recordRequestLatency(long responseLatencyMs) {

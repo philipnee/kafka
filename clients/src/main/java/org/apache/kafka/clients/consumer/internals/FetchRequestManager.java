@@ -70,13 +70,11 @@ public class FetchRequestManager extends AbstractFetch implements RequestManager
      */
     @Override
     public PollResult poll(long currentTimeMs) {
-        PollResult val = pollInternal(
+        return pollInternal(
             prepareFetchRequests(),
             this::handleFetchSuccess,
             this::handleFetchFailure
         );
-        metricsManager.recordPollTime(val.timeUntilNextPollMs);
-        return val;
     }
 
     /**

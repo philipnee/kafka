@@ -130,29 +130,7 @@ class PlaintextConsumerCommitTest extends AbstractConsumerTest {
     val i = consumer.metrics().asScala.iterator
     while (i.hasNext) {
       val metric = i.next()
-      if (metric._1.name().contains("poll-time-avg")) {
-        println(metric._2.metricName().name() + ":" + metric._2.metricValue())
-      }
-
-      if (metric._1.name().contains("poll-time-max")) {
-        println(metric._2.metricName().name() + ":" + metric._2.metricValue())
-      }
-
-      if (metric._1.name().contains("backoff-time-avg")) {
-        println(metric._2.metricName().name() + ":" + metric._2.metricValue())
-      }
-
-      if (metric._1.name().contains("backoff-time-max")) {
-        println(metric._2.metricName().name() + ":" +  metric._2.metricValue())
-      }
-
-      if (metric._1.name().contains("no-backoff")) {
-        println(metric._2.metricName().name() + ":" +  metric._2.metricValue())
-      }
-
-      if (metric._1.name().contains("poll")) {
-        println(metric._2.metricName().name() + ":" + metric._2.metricValue())
-      }
+      println(metric._2.metricName().name() + " : " + metric._2.metricValue())
     }
   }
 

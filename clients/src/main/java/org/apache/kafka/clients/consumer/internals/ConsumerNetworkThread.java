@@ -157,7 +157,7 @@ public class ConsumerNetworkThread extends KafkaThread implements Closeable {
 
     private final BiFunction<RequestManager, Long, NetworkClientDelegate.PollResult> pollAndRecordMetric = (rm, currentTimeMs) -> {
         NetworkClientDelegate.PollResult pollTime = rm.poll(currentTimeMs);
-        networkThreadMetrics.recordPollTime(pollTime.timeUntilNextPollMs);
+        networkThreadMetrics.recordPollTime(rm.getClass().getName(), pollTime.timeUntilNextPollMs);
         return pollTime;
     };
 

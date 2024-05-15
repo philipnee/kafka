@@ -33,6 +33,12 @@ public class NetworkThreadMetrics {
     private Sensor backoffTimeSensor;
 
     private Sensor requestManagerPollSensor;
+
+    private Sensor coordinatorPollSensor;
+    private Sensor commitRequestManagerPollSensor;
+    private Sensor heartbeatRequestManagerPollSensor;
+    private Sensor fetchRequestManagerPollSensor;
+    private Sensor OffsetsRequestManagerPollSensor;
     private final Metrics metrics;
 
     public NetworkThreadMetrics(Metrics metrics) {
@@ -71,16 +77,6 @@ public class NetworkThreadMetrics {
         backoffTimeSensor.add(backoffTimeAvg, new Avg());
         backoffTimeSensor.add(backoffTimeMax, new Max());
 
-        MetricName coordinatorPollTimeAvg = metrics.metricName("coordinator-poll-time-avg",
-            metricGroupName,
-            "average coordinator poll time");
-        MetricName commitPollTimeAvg = metrics.metricName("commit-poll-time-avg",
-            metricGroupName,
-            "average commit poll time");
-        MetricName hbPollTimeAvg = metrics.metricName("hb-poll-time-avg",
-            metricGroupName,
-            "average hb poll time");
-
         requestManagerPollSensor = metrics.sensor("poll-time-sensor");
         MetricName pta = metrics.metricName("poll-time-avg",
             metricGroupName,
@@ -104,23 +100,90 @@ public class NetworkThreadMetrics {
             new Frequency(ztm, 0),
             new Frequency(mtm, Long.MAX_VALUE)));
 
+        // coordinator poll time sensor
+        coordinatorPollSensor = metrics.sensor("coordinator-poll-time-sensor");
+        MetricName coordinatorPollTimeAvg = metrics.metricName("coordinator-poll-time-avg",
+            metricGroupName,
+            "The average time taken for a coordinator poll request");
+        MetricName coordinatorPollTimeMin = metrics.metricName("coordinator-poll-time-hist",
+            metricGroupName,
+            "The number of times coordinator return 0 poll time");
+        coordinatorPollSensor.add(coordinatorPollTimeAvg, new Avg());
+        coordinatorPollSensor.add(coordinatorPollTimeMin, new Frequencies(2, 0, Long.MAX_VALUE,
+            new Frequency(coordinatorPollTimeMin, 0),
+            new Frequency(coordinatorPollTimeMin, Long.MAX_VALUE)));
+
+        // commit request manager poll time sensor
+        commitRequestManagerPollSensor = metrics.sensor("commit-poll-time-sensor");
+        MetricName commitRequestManagerPollTimeAvg = metrics.metricName("commit-poll-time-avg",
+            metricGroupName,
+            "The average time taken for a commit request manager poll request");
+        MetricName commitRequestManagerPollTimeMin = metrics.metricName("commit-poll-time-hist",
+            metricGroupName,
+            "The number of times commit request manager return 0 poll time");
+        commitRequestManagerPollSensor.add(commitRequestManagerPollTimeAvg, new Avg());
+        commitRequestManagerPollSensor.add(commitRequestManagerPollTimeMin, new Frequencies(2, 0, Long.MAX_VALUE,
+            new Frequency(commitRequestManagerPollTimeMin, 0),
+            new Frequency(commitRequestManagerPollTimeMin, Long.MAX_VALUE)));
+
+        // heartbeat request manager poll time sensor
+        heartbeatRequestManagerPollSensor = metrics.sensor("heartbeat-poll-time-sensor");
+        MetricName heartbeatRequestManagerPollTimeAvg = metrics.metricName("heartbeat-poll-time-avg",
+            metricGroupName,
+            "The average time taken for a heartbeat request manager poll request");
+        MetricName heartbeatRequestManagerPollTimeMin = metrics.metricName("heartbeat-poll-time-hist",
+            metricGroupName,
+            "The number of times heartbeat request manager return 0 poll time");
+        heartbeatRequestManagerPollSensor.add(heartbeatRequestManagerPollTimeAvg, new Avg());
+        heartbeatRequestManagerPollSensor.add(heartbeatRequestManagerPollTimeMin, new Frequencies(2, 0, Long.MAX_VALUE,
+            new Frequency(heartbeatRequestManagerPollTimeMin, 0),
+            new Frequency(heartbeatRequestManagerPollTimeMin, Long.MAX_VALUE)));
+
+        // fetch request manager poll time sensor
+        fetchRequestManagerPollSensor = metrics.sensor("fetch-poll-time-sensor");
+        MetricName fetchRequestManagerPollTimeAvg = metrics.metricName("fetch-poll-time-avg",
+            metricGroupName,
+            "The average time taken for a fetch request manager poll request");
+        MetricName fetchRequestManagerPollTimeMin = metrics.metricName("fetch-poll-time-hist",
+            metricGroupName,
+            "The number of times fetch request manager return 0 poll time");
+        fetchRequestManagerPollSensor.add(fetchRequestManagerPollTimeAvg, new Avg());
+        fetchRequestManagerPollSensor.add(fetchRequestManagerPollTimeMin, new Frequencies(2, 0, Long.MAX_VALUE,
+            new Frequency(fetchRequestManagerPollTimeMin, 0),
+            new Frequency(fetchRequestManagerPollTimeMin, Long.MAX_VALUE)));
+
+        // offsets request manager poll time sensor
+        OffsetsRequestManagerPollSensor = metrics.sensor("offsets-poll-time-sensor");
+        MetricName OffsetsRequestManagerPollTimeAvg = metrics.metricName("offsets-poll-time-avg",
+            metricGroupName,
+            "The average time taken for a offsets request manager poll request");
+        MetricName OffsetsRequestManagerPollTimeMin = metrics.metricName("offsets-poll-time-hist",
+            metricGroupName,
+            "The number of times offsets request manager return 0 poll time");
+        OffsetsRequestManagerPollSensor.add(OffsetsRequestManagerPollTimeAvg, new Avg());
+        OffsetsRequestManagerPollSensor.add(OffsetsRequestManagerPollTimeMin, new Frequencies(2, 0, Long.MAX_VALUE,
+            new Frequency(OffsetsRequestManagerPollTimeMin, 0),
+            new Frequency(OffsetsRequestManagerPollTimeMin, Long.MAX_VALUE)));
+
+        commitRequestManagerPollSensor = metrics.sensor("commit-poll-time-sensor");
     }
 
-    public void recordPollTime(long pollTimeMs) {
+    public void recordPollTime(String rmClass, long pollTimeMs) {
+        switch (rmClass) {
+            case "org.apache.kafka.clients.consumer.internals.CommitRequestManager":
+                commitRequestManagerPollSensor.record(pollTimeMs);
+                break;
+            case "org.apache.kafka.clients.consumer.internals.HeartbeatRequestManager":
+                heartbeatRequestManagerPollSensor.record(pollTimeMs);
+                break;
+            case "org.apache.kafka.clients.consumer.internals.FetchRequestManager":
+                fetchRequestManagerPollSensor.record(pollTimeMs);
+                break;
+        }
         pollTimeSensor.record(pollTimeMs);
     }
 
     public void recordBackoffTime(long waitTime) {
         backoffTimeSensor.record(waitTime);
-    }
-
-    public void recordCoordinatorPollTime(long pollTimeMs) {
-        requestManagerPollSensor.record(pollTimeMs);
-    }
-
-    public void recordCommitPollTime(long pollTimeMs) {
-    }
-
-    public void recordHeartbeatPollTime(long pollTimeMs) {
     }
 }

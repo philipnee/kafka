@@ -25,8 +25,6 @@ import org.apache.kafka.common.errors.RetriableException;
 import org.apache.kafka.common.message.FindCoordinatorRequestData;
 import org.apache.kafka.common.message.FindCoordinatorResponseData;
 import org.apache.kafka.common.metrics.Metrics;
-import org.apache.kafka.common.metrics.Sensor;
-import org.apache.kafka.common.metrics.stats.Avg;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.requests.FindCoordinatorRequest;
 import org.apache.kafka.common.requests.FindCoordinatorResponse;
@@ -38,7 +36,6 @@ import java.util.Objects;
 import java.util.Optional;
 
 import static org.apache.kafka.clients.consumer.internals.NetworkClientDelegate.PollResult.EMPTY;
-import static org.apache.kafka.clients.consumer.internals.NetworkClientDelegate.PollResult.WAIT_FOREVER;
 
 /**
  * This is responsible for timing to send the next {@link FindCoordinatorRequest} based on the following criteria:
@@ -65,7 +62,6 @@ public class CoordinatorRequestManager implements RequestManager {
     private long totalDisconnectedMin = 0;
     private Node coordinator;
 
-    private Sensor coordinatorSensor;
     public CoordinatorRequestManager(
         final Time time,
         final LogContext logContext,
@@ -106,10 +102,6 @@ public class CoordinatorRequestManager implements RequestManager {
             retryBackoffMs,
             retryBackoffMaxMs
         );
-        coordinatorSensor = metrics.sensor("coordinator-poll-metrics");
-        coordinatorSensor.add( metrics.metricName("coordinator-backoff-time-avg",
-            "poll-metrics",
-            "The average time taken for a fetch request"), new Avg());
     }
 
     /**
@@ -125,18 +117,15 @@ public class CoordinatorRequestManager implements RequestManager {
     @Override
     public NetworkClientDelegate.PollResult poll(final long currentTimeMs) {
         if (this.coordinator != null) {
-            coordinatorSensor.record(WAIT_FOREVER);
             return EMPTY;
         }
 
         if (coordinatorRequestState.canSendRequest(currentTimeMs)) {
             NetworkClientDelegate.UnsentRequest request = makeFindCoordinatorRequest(currentTimeMs);
             coordinatorRequestState.onSendAttempt(currentTimeMs);
-            coordinatorSensor.record(WAIT_FOREVER);
             return new NetworkClientDelegate.PollResult(request);
         }
 
-        coordinatorSensor.record(coordinatorRequestState.remainingBackoffMs(currentTimeMs));
         return new NetworkClientDelegate.PollResult(coordinatorRequestState.remainingBackoffMs(currentTimeMs));
     }
 
