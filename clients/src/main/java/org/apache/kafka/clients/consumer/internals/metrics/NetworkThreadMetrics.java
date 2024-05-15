@@ -23,6 +23,10 @@ import org.apache.kafka.common.metrics.stats.Avg;
 import org.apache.kafka.common.metrics.stats.Frequencies;
 import org.apache.kafka.common.metrics.stats.Frequency;
 import org.apache.kafka.common.metrics.stats.Max;
+import org.apache.kafka.common.metrics.stats.Rate;
+import org.apache.kafka.common.metrics.stats.WindowedCount;
+
+import java.util.concurrent.TimeUnit;
 
 import static org.apache.kafka.clients.consumer.internals.ConsumerUtils.CONSUMER_METRIC_GROUP_PREFIX;
 import static org.apache.kafka.clients.consumer.internals.ConsumerUtils.NETWORK_METRICS_SUFFIX;
@@ -31,8 +35,6 @@ public class NetworkThreadMetrics {
     private Sensor pollTimeSensor;
 
     private Sensor backoffTimeSensor;
-
-    private Sensor requestManagerPollSensor;
 
     private Sensor coordinatorPollSensor;
     private Sensor commitRequestManagerPollSensor;
@@ -54,8 +56,12 @@ public class NetworkThreadMetrics {
             metricGroupName,
             "The max time taken for a poll request");
 
+        MetricName pollRate =  metrics.metricName("poll-rate", metricGroupName,
+                String.format("The number of %s per second", "network poll"));
+
         pollTimeSensor.add(pollTimeAvg, new Avg());
         pollTimeSensor.add(pollTimeMax, new Max());
+        pollTimeSensor.add(pollRate,  new Rate(TimeUnit.SECONDS, new WindowedCount()));
 
         backoffTimeSensor = metrics.sensor("backoff-time");
         MetricName backoffTimeAvg = metrics.metricName("backoff-time-avg",
@@ -76,29 +82,6 @@ public class NetworkThreadMetrics {
 
         backoffTimeSensor.add(backoffTimeAvg, new Avg());
         backoffTimeSensor.add(backoffTimeMax, new Max());
-
-        requestManagerPollSensor = metrics.sensor("poll-time-sensor");
-        MetricName pta = metrics.metricName("poll-time-avg",
-            metricGroupName,
-            "The average time taken for a poll request");
-
-        MetricName ptm = metrics.metricName("poll-time-max",
-            metricGroupName,
-            "The max time taken for a poll request");
-
-        MetricName ztm = metrics.metricName("zero-poll-time",
-            metricGroupName,
-            "The number of time poll time returns zero");
-
-        MetricName mtm = metrics.metricName("max-poll-time",
-            metricGroupName,
-            "The number of time poll time returns max value");
-
-        requestManagerPollSensor.add(pta, new Avg());
-        requestManagerPollSensor.add(ptm, new Max());
-        requestManagerPollSensor.add(new Frequencies(2, 0, Long.MAX_VALUE,
-            new Frequency(ztm, 0),
-            new Frequency(mtm, Long.MAX_VALUE)));
 
         // coordinator poll time sensor
         coordinatorPollSensor = metrics.sensor("coordinator-poll-time-sensor");
@@ -178,6 +161,8 @@ public class NetworkThreadMetrics {
                 break;
             case "org.apache.kafka.clients.consumer.internals.FetchRequestManager":
                 fetchRequestManagerPollSensor.record(pollTimeMs);
+            case "org.apache.kafka.clients.consumer.internals.CoordinatorRequestManager":
+                coordinatorPollSensor.record(pollTimeMs);
                 break;
         }
         pollTimeSensor.record(pollTimeMs);

@@ -131,6 +131,7 @@ class PlaintextConsumerCommitTest extends AbstractConsumerTest {
     while (i.hasNext) {
       val metric = i.next()
       println(metric._2.metricName().name() + " : " + metric._2.metricValue())
+      println(metric._2.metricName().description())
     }
   }
 

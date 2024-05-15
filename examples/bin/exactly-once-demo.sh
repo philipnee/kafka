@@ -17,7 +17,8 @@
 base_dir=$(dirname $0)/../..
 
 if [ "x$KAFKA_HEAP_OPTS" = "x" ]; then
-    export KAFKA_HEAP_OPTS="-Xmx512M"
+   # export KAFKA_HEAP_OPTS="-Xmx512M -javaagent:/Users/pnee/code/jmx_exporter/jmx_prometheus_javaagent/target/jmx_prometheus_javaagent-1.0.0-SNAPSHOT.jar=8080:jmx.yml"
+   export KAFKA_HEAP_OPTS="-Xms4G"
 fi
 
 exec $base_dir/bin/kafka-run-class.sh kafka.examples.KafkaExactlyOnceDemo $@

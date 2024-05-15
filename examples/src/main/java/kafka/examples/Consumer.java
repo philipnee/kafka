@@ -25,6 +25,8 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.NoOffsetForPartitionException;
 import org.apache.kafka.clients.consumer.OffsetOutOfRangeException;
 import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.Metric;
+import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.AuthorizationException;
 import org.apache.kafka.common.errors.RecordDeserializationException;
@@ -34,6 +36,7 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 
 import java.time.Duration;
 import java.util.Collection;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.UUID;
@@ -89,7 +92,7 @@ public class Consumer extends Thread implements ConsumerRebalanceListener {
                     // then tries to fetch records sequentially using the last committed offset or auto.offset.reset policy
                     // returns immediately if there are records or times out returning an empty record set
                     // the next poll must be called within session.timeout.ms to avoid group rebalance
-                    ConsumerRecords<Integer, String> records = consumer.poll(Duration.ofSeconds(1));
+                    ConsumerRecords<Integer, String> records = consumer.poll(Duration.ofSeconds(10));
                     for (ConsumerRecord<Integer, String> record : records) {
                         Utils.maybePrintRecord(numRecords, record);
                     }
@@ -108,6 +111,12 @@ public class Consumer extends Thread implements ConsumerRebalanceListener {
                     // log the exception and try to continue
                     Utils.printErr(e.getMessage());
                 }
+            }
+
+            Map<MetricName, ? extends Metric> metrics = consumer.metrics();
+            for (Map.Entry<MetricName, ? extends Metric> entry : metrics.entrySet()) {
+                if (entry.getKey().group() == "consumer-network-metrics")
+                    Utils.printOut("%s: %s", entry.getKey(), entry.getValue().metricValue());
             }
         } catch (Throwable e) {
             Utils.printErr("Unhandled exception");
