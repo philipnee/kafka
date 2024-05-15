@@ -123,7 +123,7 @@ public class ExactlyOnceMessageProcessor extends Thread implements ConsumerRebal
             producer.initTransactions();
             consumer.subscribe(singleton(inputTopic), this);
 
-            Utils.printOut("Processing new records");
+            //Utils.printOut("Processing new records");
             while (!closed && remainingRecords > 0) {
                 try {
                     ConsumerRecords<Integer, String> records = consumer.poll(ofMillis(200));
@@ -180,17 +180,17 @@ public class ExactlyOnceMessageProcessor extends Thread implements ConsumerRebal
 
     @Override
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
-        Utils.printOut("Revoked partitions: %s", partitions);
+        //Utils.printOut("Revoked partitions: %s", partitions);
     }
 
     @Override
     public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
-        Utils.printOut("Assigned partitions: %s", partitions);
+        //Utils.printOut("Assigned partitions: %s", partitions);
     }
 
     @Override
     public void onPartitionsLost(Collection<TopicPartition> partitions) {
-        Utils.printOut("Lost partitions: %s", partitions);
+        //Utils.printOut("Lost partitions: %s", partitions);
     }
 
     public void shutdown() {

@@ -46,7 +46,7 @@ import java.util.stream.IntStream;
  * record all the log output together.
  */
 public class KafkaExactlyOnceDemo {
-    private static final String INPUT_TOPIC = "topic_1";
+    private static final String INPUT_TOPIC = "topic_2";
     private static final String OUTPUT_TOPIC = "output-topic";
     public static final String GROUP_NAME = "check-group";
 
@@ -73,7 +73,7 @@ public class KafkaExactlyOnceDemo {
                     "producer",
                     KafkaProperties.BOOTSTRAP_SERVERS,
                     INPUT_TOPIC,
-                    true,
+                    false,
                     null,
                     true,
                     numRecords,

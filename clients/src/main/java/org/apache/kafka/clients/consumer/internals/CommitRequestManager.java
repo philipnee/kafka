@@ -742,7 +742,7 @@ public class CommitRequestManager implements RequestManager, MemberStateListener
                     } else {
                         // Fail with a non-retriable KafkaException for all unexpected errors
                         // (even if they are retriable)
-                        future.completeExceptionally(new KafkaException("Unexpected error in commit: " + error.message()));
+                        future.completeExceptionally(new KafkaException("Unexpected error in commit: " + error));
                         return;
                     }
                 }
