@@ -73,7 +73,7 @@ public class KafkaExactlyOnceDemo {
                     "producer",
                     KafkaProperties.BOOTSTRAP_SERVERS,
                     INPUT_TOPIC,
-                    false,
+                    true,
                     null,
                     true,
                     numRecords,

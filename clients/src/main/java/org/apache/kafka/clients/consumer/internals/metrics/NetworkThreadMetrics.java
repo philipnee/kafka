@@ -114,13 +114,12 @@ public class NetworkThreadMetrics {
         MetricName heartbeatRequestManagerPollTimeAvg = metrics.metricName("heartbeat-poll-time-avg",
             metricGroupName,
             "The average time taken for a heartbeat request manager poll request");
-        MetricName heartbeatRequestManagerPollTimeMin = metrics.metricName("heartbeat-poll-time-hist",
+        MetricName heartbeatRequestManagerPollTimeMin = metrics.metricName("heartbeat-poll-time-histogram",
             metricGroupName,
             "The number of times heartbeat request manager return 0 poll time");
         heartbeatRequestManagerPollSensor.add(heartbeatRequestManagerPollTimeAvg, new Avg());
-        heartbeatRequestManagerPollSensor.add(heartbeatRequestManagerPollTimeMin, new Frequencies(2, 0, Long.MAX_VALUE,
-            new Frequency(heartbeatRequestManagerPollTimeMin, 0),
-            new Frequency(heartbeatRequestManagerPollTimeMin, Long.MAX_VALUE)));
+        heartbeatRequestManagerPollSensor.add(heartbeatRequestManagerPollTimeMin,
+            new Frequencies(5, 0, Long.MAX_VALUE));
 
         // fetch request manager poll time sensor
         fetchRequestManagerPollSensor = metrics.sensor("fetch-poll-time-sensor");
@@ -161,6 +160,7 @@ public class NetworkThreadMetrics {
                 break;
             case "org.apache.kafka.clients.consumer.internals.FetchRequestManager":
                 fetchRequestManagerPollSensor.record(pollTimeMs);
+                break;
             case "org.apache.kafka.clients.consumer.internals.CoordinatorRequestManager":
                 coordinatorPollSensor.record(pollTimeMs);
                 break;
