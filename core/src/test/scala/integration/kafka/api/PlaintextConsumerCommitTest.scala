@@ -130,8 +130,8 @@ class PlaintextConsumerCommitTest extends AbstractConsumerTest {
     val i = consumer.metrics().asScala.iterator
     while (i.hasNext) {
       val metric = i.next()
-      println(metric._2.metricName().name() + " : " + metric._2.metricValue())
-      println(metric._2.metricName().description())
+      if (metric._1.group() == "consumer-network-metrics")
+        println(metric._1.name() + ":" + metric._2.metricName().description() + ":" + metric._2.metricName().name() + " : " + metric._2.metricValue())
     }
   }
 

@@ -153,6 +153,7 @@ public class ConsumerNetworkThread extends KafkaThread implements Closeable {
                 .reduce(Long.MAX_VALUE, Math::min);
 
         networkThreadMetrics.recordBackoffTime(System.currentTimeMillis() - currentTimeMs);
+        networkThreadMetrics.recordRun();
     }
 
     private final BiFunction<RequestManager, Long, NetworkClientDelegate.PollResult> pollAndRecordMetric = (rm, currentTimeMs) -> {
